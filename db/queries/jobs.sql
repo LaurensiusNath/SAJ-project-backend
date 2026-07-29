@@ -13,6 +13,15 @@ SELECT COUNT(*) FROM jobs WHERE EXTRACT(YEAR FROM created_at)::int = sqlc.arg(ye
 -- name: GetJobByID :one
 SELECT * FROM jobs WHERE id = $1;
 
+-- name: GetJobForUpdate :one
+-- FOR UPDATE mengunci baris job ini sampai transaksi pemanggil
+-- commit/rollback - dipakai invoice.Repository.CreateFromJob supaya dua
+-- request "generate invoice" untuk job yang sama tidak bisa lolos
+-- pengecekan "job belum ada invoice" secara bersamaan (classic
+-- check-then-act race). Request kedua akan menunggu di baris ini sampai
+-- request pertama selesai, baru membaca status job yang sudah ter-update.
+SELECT * FROM jobs WHERE id = $1 FOR UPDATE;
+
 -- name: ListJobs :many
 SELECT * FROM jobs
 WHERE (status = sqlc.narg('status') OR sqlc.narg('status') IS NULL)
