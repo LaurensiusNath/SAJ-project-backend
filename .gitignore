@@ -1,0 +1,21 @@
+# Environment
+.env
+.env.local
+
+# Generated code (sqlc) - regenerated from db/queries/*.sql via `sqlc generate`
+internal/repository/sqlcgen/
+
+# Build output
+/bin/
+/cnc-pm-backend
+cnc-pm-backend.exe
+
+# Go
+*.test
+*.out
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
