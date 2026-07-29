@@ -14,6 +14,7 @@ import (
 	"github.com/nathan/cnc-pm-backend/internal/customer"
 	"github.com/nathan/cnc-pm-backend/internal/invoice"
 	"github.com/nathan/cnc-pm-backend/internal/job"
+	"github.com/nathan/cnc-pm-backend/internal/notification"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
 	"github.com/nathan/cnc-pm-backend/internal/settings"
 	"github.com/nathan/cnc-pm-backend/internal/user"
@@ -50,6 +51,13 @@ func main() {
 	router := gin.Default()
 
 	queries := sqlcgen.New(dbPool)
+
+	if cfg.SMTPHost == "" {
+		log.Println("PERINGATAN: SMTP_HOST kosong - semua notifikasi email akan gagal terkirim (tetap tercatat di tabel notifications)")
+	}
+	notificationRepo := notification.NewRepository(queries)
+	mailer := notification.NewSMTPMailer(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
+	notifier := notification.NewService(notificationRepo, mailer)
 
 	// authService dibuat lebih dulu - dipakai baik untuk mendaftarkan
 	// POST /auth/login (publik) maupun untuk middleware RequireAuth yang
@@ -91,7 +99,7 @@ func main() {
 	machineHandler.RegisterRoutes(protectedGroup)
 
 	jobRepo := job.NewRepository(queries)
-	jobService := job.NewService(jobRepo)
+	jobService := job.NewService(jobRepo, customerRepo, userRepo, notifier)
 	jobHandler := job.NewHandler(jobService)
 	jobHandler.RegisterRoutes(protectedGroup)
 
@@ -107,7 +115,7 @@ func main() {
 
 	// invoice.NewRepository butuh dbPool (bukan cuma queries) - CreateFromJob
 	// dan RecordPayment membuka transaksi sendiri (lihat internal/invoice/repository.go).
-	invoiceRepo := invoice.NewRepository(dbPool, queries)
+	invoiceRepo := invoice.NewRepository(dbPool, queries, notifier)
 	invoiceService := invoice.NewService(invoiceRepo)
 	invoiceHandler := invoice.NewHandler(invoiceService)
 	invoiceHandler.RegisterRoutes(protectedGroup)
