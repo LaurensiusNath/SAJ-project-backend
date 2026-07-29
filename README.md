@@ -31,6 +31,11 @@ cp .env.example .env
 docker compose up -d postgres redis
 ```
 
+Isi `JWT_SECRET` di `.env` (wajib, server menolak start kalau kosong):
+```bash
+openssl rand -hex 32
+```
+
 ### 3. Jalankan migration
 ```bash
 migrate -path db/migrations -database "postgres://cncuser:cncpassword@localhost:5432/cnc_pm_db?sslmode=disable" up

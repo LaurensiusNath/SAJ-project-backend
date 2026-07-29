@@ -6,9 +6,10 @@ require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/jackc/pgx/v5 v5.6.0
 	github.com/joho/godotenv v1.5.1
+	github.com/shopspring/decimal v1.4.0
 )
 
-require github.com/shopspring/decimal v1.4.0 // indirect
+require github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect

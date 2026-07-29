@@ -9,12 +9,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
+	"github.com/nathan/cnc-pm-backend/internal/auth"
 	"github.com/nathan/cnc-pm-backend/internal/config"
 	"github.com/nathan/cnc-pm-backend/internal/customer"
 	"github.com/nathan/cnc-pm-backend/internal/invoice"
 	"github.com/nathan/cnc-pm-backend/internal/job"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
 	"github.com/nathan/cnc-pm-backend/internal/settings"
+	"github.com/nathan/cnc-pm-backend/internal/user"
 )
 
 func init() {
@@ -49,36 +51,66 @@ func main() {
 
 	queries := sqlcgen.New(dbPool)
 
+	// authService dibuat lebih dulu - dipakai baik untuk mendaftarkan
+	// POST /auth/login (publik) maupun untuk middleware RequireAuth yang
+	// dipasang di semua route group lain.
+	userRepo := user.NewRepository(queries)
+	userService := user.NewService(userRepo)
+	authService := auth.NewService(userRepo, cfg.JWTSecret)
+	authHandler := auth.NewHandler(authService)
+
+	// publicGroup: SATU-SATUNYA route tanpa RequireAuth, sesuai
+	// api-contract.md ("semua endpoint kecuali /auth/login butuh Bearer token").
+	publicGroup := router.Group("/api/v1")
+	authHandler.RegisterRoutes(publicGroup)
+
+	// protectedGroup: semua endpoint bisnis, wajib Bearer token valid.
+	protectedGroup := router.Group("/api/v1")
+	protectedGroup.Use(authService.RequireAuth())
+
+	// adminOnly dipakai untuk route yang butuh RequireAuth DAN role
+	// owner/admin sekaligus (POST /users). Untuk endpoint yang cuma
+	// SEBAGIAN method-nya dibatasi role (PUT /settings/company, tapi GET-nya
+	// tetap untuk semua user login), requireAdmin di-inject langsung ke
+	// handler yang bersangkutan (lihat settings.Handler.RegisterRoutes),
+	// bukan lewat route group terpisah.
+	requireAdmin := auth.RequireRole(user.RoleOwner, user.RoleAdmin)
+	adminGroup := router.Group("/api/v1")
+	adminGroup.Use(authService.RequireAuth(), requireAdmin)
+
+	userHandler := user.NewHandler(userService)
+	userHandler.RegisterRoutes(adminGroup)
+
 	customerRepo := customer.NewRepository(queries)
 	customerService := customer.NewService(customerRepo)
 	machineRepo := customer.NewMachineRepository(queries)
 	machineService := customer.NewMachineService(machineRepo, customerRepo)
 	customerHandler := customer.NewHandler(customerService, machineService)
-	customerHandler.RegisterRoutes(router.Group("/api/v1"))
+	customerHandler.RegisterRoutes(protectedGroup)
 	machineHandler := customer.NewMachineHandler(machineService)
-	machineHandler.RegisterRoutes(router.Group("/api/v1"))
+	machineHandler.RegisterRoutes(protectedGroup)
 
 	jobRepo := job.NewRepository(queries)
 	jobService := job.NewService(jobRepo)
 	jobHandler := job.NewHandler(jobService)
-	jobHandler.RegisterRoutes(router.Group("/api/v1"))
+	jobHandler.RegisterRoutes(protectedGroup)
 
 	jobCostRepo := job.NewCostRepository(queries)
 	jobCostService := job.NewCostService(jobCostRepo, jobRepo)
 	jobCostHandler := job.NewCostHandler(jobCostService)
-	jobCostHandler.RegisterRoutes(router.Group("/api/v1"))
+	jobCostHandler.RegisterRoutes(protectedGroup)
 
 	settingsRepo := settings.NewRepository(queries)
 	settingsService := settings.NewService(settingsRepo)
 	settingsHandler := settings.NewHandler(settingsService)
-	settingsHandler.RegisterRoutes(router.Group("/api/v1"))
+	settingsHandler.RegisterRoutes(protectedGroup, requireAdmin)
 
 	// invoice.NewRepository butuh dbPool (bukan cuma queries) - CreateFromJob
 	// dan RecordPayment membuka transaksi sendiri (lihat internal/invoice/repository.go).
 	invoiceRepo := invoice.NewRepository(dbPool, queries)
 	invoiceService := invoice.NewService(invoiceRepo)
 	invoiceHandler := invoice.NewHandler(invoiceService)
-	invoiceHandler.RegisterRoutes(router.Group("/api/v1"))
+	invoiceHandler.RegisterRoutes(protectedGroup)
 
 	// Health check endpoint - wajib ada untuk deployment (dipakai load balancer /
 	// orchestrator buat cek apakah service masih hidup)

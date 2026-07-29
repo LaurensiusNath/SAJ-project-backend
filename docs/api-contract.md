@@ -16,6 +16,45 @@
 
 ---
 
+## Modul Auth & User – **baru**
+
+Tidak ada endpoint registrasi publik. User pertama (role `owner`) di-seed langsung lewat migration; user lain (admin/teknisi) didaftarkan oleh owner/admin lewat `POST /users`.
+
+### `POST /auth/login`
+Satu-satunya endpoint yang tidak butuh `Authorization` header.
+
+Request body:
+```json
+{ "email": "owner@cncservis.local", "password": "ChangeMe123!" }
+```
+Response `200`:
+```json
+{ "success": true, "data": { "access_token": "<jwt>" } }
+```
+Response `401` (email tidak ditemukan ATAU password salah – sengaja tidak dibedakan, supaya tidak membocorkan email mana yang terdaftar):
+```json
+{ "success": false, "error": { "code": "UNAUTHORIZED", "message": "invalid email or password" } }
+```
+
+Token berlaku 24 jam (HS256), tidak ada refresh token. Isi payload: `user_id`, `role`, `exp`.
+
+### `POST /users` – **hanya role `owner`/`admin`**
+Mendaftarkan staf baru (admin/teknisi, atau owner lain).
+
+Request body:
+```json
+{ "name": "Teknisi Baru", "email": "teknisi@cncservis.local", "password": "minimal8karakter", "role": "teknisi" }
+```
+`role` harus salah satu dari `owner`, `admin`, `teknisi`. Response `201`: object user (tanpa `password_hash` – field ini tidak pernah keluar lewat API). Response `403` kalau dipanggil user selain owner/admin:
+```json
+{ "success": false, "error": { "code": "FORBIDDEN", "message": "insufficient permissions for this action" } }
+```
+
+### Role di endpoint lain
+Cuma `PUT /settings/company` yang eksplisit dibatasi role (`owner`/`admin`) – `GET /settings/company` dan semua endpoint Customer/Job/Costing-Invoice terbuka untuk siapapun yang sudah login (role apapun), sesuai kontrak yang ada sejauh ini.
+
+---
+
 ## 0. Modul Company Settings
 
 Karena PT sudah PKP, konfigurasi pajak dipusatkan di sini – bukan diinput ulang tiap invoice, supaya konsisten dan gampang diubah kalau aturan pajak berubah lagi.
