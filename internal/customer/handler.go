@@ -15,11 +15,15 @@ import (
 // validasi bentuk request, panggil Service, format response - tidak ada
 // business logic di sini (itu tugas service.go).
 type Handler struct {
-	svc *Service
+	svc        *Service
+	machineSvc *MachineService
 }
 
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+// NewHandler butuh MachineService juga - GetByID mengembalikan customer
+// beserta nested machines-nya (lihat api-contract.md: "Detail customer +
+// nested machines"), jadi handler ini perlu menggabungkan dua service.
+func NewHandler(svc *Service, machineSvc *MachineService) *Handler {
+	return &Handler{svc: svc, machineSvc: machineSvc}
 }
 
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
@@ -61,6 +65,15 @@ func (h *Handler) Create(c *gin.Context) {
 	httpresponse.Success(c, http.StatusCreated, created)
 }
 
+// customerDetailResponse membungkus Customer + nested Machines - beda dari
+// Customer biasa (dipakai Create/List/Update) yang tidak menyertakan
+// machines sama sekali, sesuai api-contract.md yang cuma menyebut nested
+// machines untuk GET /customers/{id} secara spesifik.
+type customerDetailResponse struct {
+	Customer
+	Machines []Machine `json:"machines"`
+}
+
 func (h *Handler) GetByID(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -73,7 +86,14 @@ func (h *Handler) GetByID(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	httpresponse.Success(c, http.StatusOK, found)
+
+	machines, err := h.machineSvc.ListByCustomer(c.Request.Context(), id)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+
+	httpresponse.Success(c, http.StatusOK, customerDetailResponse{Customer: found, Machines: machines})
 }
 
 func (h *Handler) List(c *gin.Context) {
