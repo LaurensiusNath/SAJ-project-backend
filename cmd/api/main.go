@@ -7,12 +7,25 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 
 	"github.com/nathan/cnc-pm-backend/internal/config"
 	"github.com/nathan/cnc-pm-backend/internal/customer"
 	"github.com/nathan/cnc-pm-backend/internal/job"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
 )
+
+func init() {
+	// docs/api-contract.md menunjukkan field uang sebagai angka JSON polos
+	// (mis. "subtotal": 1500000), bukan string. Keputusan sadar mengikuti
+	// format itu persis - default aman decimal.Decimal sebenarnya string
+	// berkutip (menghindari frontend parse jadi float64 dan kehilangan
+	// presisi), tapi trade-off ini sudah didiskusikan dan dipilih sesuai
+	// kontrak yang ada. Frontend WAJIB pakai library decimal
+	// (mis. decimal.js/big.js), bukan Number()/parseFloat(), saat membaca
+	// field-field ini.
+	decimal.MarshalJSONWithoutQuotes = true
+}
 
 func main() {
 	cfg := config.Load()
@@ -43,6 +56,11 @@ func main() {
 	jobService := job.NewService(jobRepo)
 	jobHandler := job.NewHandler(jobService)
 	jobHandler.RegisterRoutes(router.Group("/api/v1"))
+
+	jobCostRepo := job.NewCostRepository(queries)
+	jobCostService := job.NewCostService(jobCostRepo, jobRepo)
+	jobCostHandler := job.NewCostHandler(jobCostService)
+	jobCostHandler.RegisterRoutes(router.Group("/api/v1"))
 
 	// Health check endpoint - wajib ada untuk deployment (dipakai load balancer /
 	// orchestrator buat cek apakah service masih hidup)
