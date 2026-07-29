@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/nathan/cnc-pm-backend/internal/customer"
 	"github.com/nathan/cnc-pm-backend/internal/job"
+	"github.com/nathan/cnc-pm-backend/internal/notification"
 	"github.com/nathan/cnc-pm-backend/internal/pgconv"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
 	"github.com/nathan/cnc-pm-backend/internal/settings"
@@ -68,8 +70,9 @@ type Repository interface {
 }
 
 type sqlcRepository struct {
-	pool *pgxpool.Pool
-	q    *sqlcgen.Queries
+	pool     *pgxpool.Pool
+	q        *sqlcgen.Queries
+	notifier notification.Sender
 }
 
 // NewRepository butuh *pgxpool.Pool selain *sqlcgen.Queries - beda dari
@@ -79,8 +82,16 @@ type sqlcRepository struct {
 // dipakai untuk semua statement di dalam transaksi itu. Modul lain belum
 // butuh ini karena belum ada operasi mereka yang menyentuh lebih dari satu
 // tabel sekaligus secara atomik.
-func NewRepository(pool *pgxpool.Pool, q *sqlcgen.Queries) Repository {
-	return &sqlcRepository{pool: pool, q: q}
+//
+// notifier disuntik di sini (bukan di Service) karena CreateFromJob SUDAH
+// membaca data customer di dalam transaksinya - mengirim notifikasi dari
+// sini menghindari query ulang yang sama persis dari layer atas. Ini
+// sedikit menyimpang dari "Repository cuma data access" yang biasa dipegang
+// di project ini, tapi trade-off-nya (hindari 2 query PK tambahan) dianggap
+// lebih murah daripada mengorbankan kebersihan layer, dan tetap dijelaskan
+// di sini secara eksplisit, bukan diam-diam.
+func NewRepository(pool *pgxpool.Pool, q *sqlcgen.Queries, notifier notification.Sender) Repository {
+	return &sqlcRepository{pool: pool, q: q, notifier: notifier}
 }
 
 // CreateFromJob adalah contoh Atomicity yang diminta: banyak pembacaan
@@ -105,6 +116,9 @@ func NewRepository(pool *pgxpool.Pool, q *sqlcgen.Queries) Repository {
 // konsisten" (mis. Dashboard), itu baru kandidat Repeatable Read/Serializable.
 func (r *sqlcRepository) CreateFromJob(ctx context.Context, in CreateFromJobInput) (Invoice, error) {
 	var result Invoice
+	// customerEmail ditangkap dari dalam transaksi (lihat di bawah) supaya
+	// notifikasi setelah commit tidak perlu query customer lagi.
+	var customerEmail *string
 
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		q := r.q.WithTx(tx)
@@ -140,6 +154,7 @@ func (r *sqlcRepository) CreateFromJob(ctx context.Context, in CreateFromJobInpu
 		if err != nil {
 			return fmt.Errorf("get customer: %w", err)
 		}
+		customerEmail = cust.Email
 
 		companySettings, err := settings.NewRepository(q).Get(ctx)
 		if err != nil {
@@ -193,6 +208,23 @@ func (r *sqlcRepository) CreateFromJob(ctx context.Context, in CreateFromJobInpu
 	if err != nil {
 		return Invoice{}, err
 	}
+
+	// Notifikasi dikirim SETELAH transaksi commit, di luar closure - panggilan
+	// keluar (SMTP) tidak boleh terjadi sambil masih memegang row lock
+	// transaksi. Best-effort: gagal kirim tidak membatalkan invoice yang
+	// sudah berhasil dibuat (lihat notification.Service.SendEmail).
+	if customerEmail != nil {
+		body := fmt.Sprintf(
+			"Invoice %s untuk job Anda telah terbit. Total tagihan: %s.",
+			result.InvoiceNumber, result.Total.StringFixed(2),
+		)
+		if err := r.notifier.SendEmail(ctx, notification.EmailInput{
+			To: *customerEmail, Subject: "Invoice Baru Diterbitkan", Body: body, InvoiceID: &result.ID,
+		}); err != nil {
+			log.Printf("notifikasi invoice %s ke customer %s gagal: %v", result.InvoiceNumber, *customerEmail, err)
+		}
+	}
+
 	return result, nil
 }
 
