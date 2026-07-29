@@ -6,9 +6,6 @@ RETURNING *;
 -- name: ListJobCostsByJob :many
 SELECT * FROM job_costs WHERE job_id = $1 ORDER BY created_at ASC;
 
--- name: GetJobCostByID :one
-SELECT * FROM job_costs WHERE id = $1 AND job_id = $2;
-
 -- name: DeleteJobCost :execrows
 DELETE FROM job_costs WHERE id = $1 AND job_id = $2;
 
