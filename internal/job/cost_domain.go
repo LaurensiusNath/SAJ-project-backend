@@ -43,15 +43,15 @@ var (
 // dari kolom generated di database (lihat migration 000006), jadi field ini
 // cuma pernah diisi oleh repository.go, tidak pernah oleh CreateInput.
 type JobCost struct {
-	ID            uuid.UUID
-	JobID         uuid.UUID
-	CostType      CostType
-	Description   string
-	Quantity      decimal.Decimal
-	PurchasePrice *decimal.Decimal
-	SellingPrice  decimal.Decimal
-	Subtotal      decimal.Decimal
-	CreatedAt     time.Time
+	ID            uuid.UUID        `json:"id"`
+	JobID         uuid.UUID        `json:"job_id"`
+	CostType      CostType         `json:"cost_type"`
+	Description   string           `json:"description"`
+	Quantity      decimal.Decimal  `json:"quantity"`
+	PurchasePrice *decimal.Decimal `json:"purchase_price"`
+	SellingPrice  decimal.Decimal  `json:"selling_price"`
+	Subtotal      decimal.Decimal  `json:"subtotal"`
+	CreatedAt     time.Time        `json:"created_at"`
 }
 
 func (c JobCost) Validate() error {
