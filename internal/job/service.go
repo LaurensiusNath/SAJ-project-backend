@@ -3,17 +3,29 @@ package job
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/nathan/cnc-pm-backend/internal/customer"
+	"github.com/nathan/cnc-pm-backend/internal/notification"
+	"github.com/nathan/cnc-pm-backend/internal/user"
 )
 
+// Service butuh customer.Repository dan user.Repository selain notifier -
+// AssignTechnician/UpdateStatus perlu tahu email customer/teknisi untuk
+// mengirim notifikasi. Sama pola dependency-nya dengan CostService yang
+// bergantung ke job.Repository, cuma di sini menyeberang ke modul lain.
 type Service struct {
-	repo Repository
+	repo         Repository
+	customerRepo customer.Repository
+	userRepo     user.Repository
+	notifier     notification.Sender
 }
 
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo Repository, customerRepo customer.Repository, userRepo user.Repository, notifier notification.Sender) *Service {
+	return &Service{repo: repo, customerRepo: customerRepo, userRepo: userRepo, notifier: notifier}
 }
 
 // CreateInput sengaja tidak punya Status/JobCode - job baru selalu mulai
@@ -111,6 +123,11 @@ func (s *Service) UpdateStatus(ctx context.Context, id uuid.UUID, status JobStat
 	if err != nil {
 		return Job{}, fmt.Errorf("update job status: %w", err)
 	}
+
+	if status == StatusCompleted {
+		s.notifyJobCompleted(ctx, updated)
+	}
+
 	return updated, nil
 }
 
@@ -123,5 +140,50 @@ func (s *Service) AssignTechnician(ctx context.Context, id, technicianID uuid.UU
 	if err != nil {
 		return Job{}, fmt.Errorf("assign technician: %w", err)
 	}
+
+	s.notifyAssignment(ctx, updated, technicianID)
+
 	return updated, nil
+}
+
+// notifyAssignment mengirim email ke customer (kalau punya email tercatat)
+// dan ke teknisi yang baru ditugaskan - best-effort, TIDAK PERNAH
+// menggagalkan AssignTechnician sendiri kalau pengiriman gagal (lihat
+// notification.Service.SendEmail). Kegagalan cukup di-log lewat package
+// "log" standar, bukan dikembalikan sebagai error - beda sengaja dari pola
+// error lain di file ini, karena tidak ada tindakan yang bisa/perlu
+// dilakukan caller HTTP soal gagalnya notifikasi (request assign-nya sendiri
+// tetap sukses).
+func (s *Service) notifyAssignment(ctx context.Context, j Job, technicianID uuid.UUID) {
+	if cust, err := s.customerRepo.GetByID(ctx, j.CustomerID); err == nil && cust.Email != nil {
+		body := fmt.Sprintf("Teknisi telah ditugaskan untuk servis %q (kode job %s).", j.Title, j.JobCode)
+		if err := s.notifier.SendEmail(ctx, notification.EmailInput{
+			To: *cust.Email, Subject: "Teknisi Ditugaskan untuk Servis Anda", Body: body, JobID: &j.ID,
+		}); err != nil {
+			log.Printf("notifikasi assign ke customer %s gagal: %v", *cust.Email, err)
+		}
+	}
+
+	if tech, err := s.userRepo.GetByID(ctx, technicianID); err == nil {
+		body := fmt.Sprintf("Anda ditugaskan untuk job %s (%s).", j.JobCode, j.Title)
+		if err := s.notifier.SendEmail(ctx, notification.EmailInput{
+			To: tech.Email, Subject: "Penugasan Job Baru", Body: body, JobID: &j.ID,
+		}); err != nil {
+			log.Printf("notifikasi assign ke teknisi %s gagal: %v", tech.Email, err)
+		}
+	}
+}
+
+// notifyJobCompleted sama sifatnya (best-effort) dengan notifyAssignment.
+func (s *Service) notifyJobCompleted(ctx context.Context, j Job) {
+	cust, err := s.customerRepo.GetByID(ctx, j.CustomerID)
+	if err != nil || cust.Email == nil {
+		return
+	}
+	body := fmt.Sprintf("Servis untuk job %s (%s) telah selesai.", j.JobCode, j.Title)
+	if err := s.notifier.SendEmail(ctx, notification.EmailInput{
+		To: *cust.Email, Subject: "Servis Anda Telah Selesai", Body: body, JobID: &j.ID,
+	}); err != nil {
+		log.Printf("notifikasi job completed ke customer %s gagal: %v", *cust.Email, err)
+	}
 }
