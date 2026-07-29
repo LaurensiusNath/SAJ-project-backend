@@ -10,10 +10,6 @@ import (
 	"github.com/nathan/cnc-pm-backend/internal/httpresponse"
 )
 
-// Handler belum menegakkan "hanya role owner/admin" yang disebut
-// api-contract.md untuk PUT - project ini belum punya modul auth/middleware
-// role sama sekali di modul manapun (Customer, Job juga belum). Ini gap
-// lintas-modul, bukan sesuatu yang bisa diselesaikan cuma di sini.
 type Handler struct {
 	svc *Service
 }
@@ -22,9 +18,15 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+// RegisterRoutes menerima requireAdmin terpisah dari rg - GET dibuka untuk
+// SEMUA user yang sudah login (cukup lolos RequireAuth yang dipasang di rg
+// oleh main.go), tapi PUT dibatasi role owner/admin sesuai api-contract.md.
+// Package ini sengaja tidak import internal/auth secara langsung (supaya
+// tidak ada modul bisnis yang bergantung ke auth) - middleware role-nya
+// disuntik dari main.go sebagai gin.HandlerFunc biasa.
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, requireAdmin gin.HandlerFunc) {
 	rg.GET("/settings/company", h.Get)
-	rg.PUT("/settings/company", h.Update)
+	rg.PUT("/settings/company", requireAdmin, h.Update)
 }
 
 func (h *Handler) Get(c *gin.Context) {
