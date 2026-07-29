@@ -181,7 +181,7 @@ func (h *Handler) respondError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		httpresponse.Error(c, http.StatusNotFound, "NOT_FOUND", err.Error())
-	case errors.Is(err, ErrInvalidTitle), errors.Is(err, ErrInvalidStatus), errors.Is(err, ErrInvalidCustomer):
+	case errors.Is(err, ErrInvalidTitle), errors.Is(err, ErrInvalidStatus), errors.Is(err, ErrInvalidCustomer), errors.Is(err, ErrInvalidReference):
 		httpresponse.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
 	default:
 		httpresponse.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")

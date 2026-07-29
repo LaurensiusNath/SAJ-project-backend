@@ -33,6 +33,9 @@ var (
 	ErrInvalidTitle    = errors.New("job title is required")
 	ErrInvalidStatus   = errors.New("status must be one of: requested, scheduled, in_progress, completed, cancelled")
 	ErrInvalidCustomer = errors.New("customer_id is required")
+	// ErrInvalidReference: customer_id/machine_id/technician_id menunjuk ke
+	// baris yang tidak ada di tabel referensinya (foreign key violation).
+	ErrInvalidReference = errors.New("referenced record does not exist")
 )
 
 // Job adalah entity domain untuk satu work order. MachineID, TechnicianID,

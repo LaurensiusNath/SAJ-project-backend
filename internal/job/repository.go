@@ -8,11 +8,26 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/nathan/cnc-pm-backend/internal/pgconv"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
 )
+
+// foreignKeyViolation is Postgres' error code for a violated FK constraint
+// (https://www.postgresql.org/docs/current/errcodes-appendix.html). Mapped
+// to the domain's ErrInvalidReference so the handler can return 400 instead
+// of leaking a raw DB error as a 500.
+const foreignKeyViolation = "23503"
+
+func asInvalidReference(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation {
+		return fmt.Errorf("%w: %s", ErrInvalidReference, pgErr.ConstraintName)
+	}
+	return nil
+}
 
 // ListFilter dipakai bersama oleh List dan Count, sama pola dengan
 // customer.ListFilter - supaya meta.total tidak bisa "berbeda kriteria"
@@ -64,6 +79,9 @@ func (r *sqlcRepository) Create(ctx context.Context, j Job) (Job, error) {
 		ScheduledDate: pgconv.ToDate(j.ScheduledDate),
 	})
 	if err != nil {
+		if mapped := asInvalidReference(err); mapped != nil {
+			return Job{}, mapped
+		}
 		return Job{}, fmt.Errorf("insert job: %w", err)
 	}
 	return fromRow(row), nil
@@ -131,6 +149,9 @@ func (r *sqlcRepository) AssignTechnician(ctx context.Context, id, technicianID 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Job{}, ErrNotFound
+		}
+		if mapped := asInvalidReference(err); mapped != nil {
+			return Job{}, mapped
 		}
 		return Job{}, fmt.Errorf("assign technician: %w", err)
 	}
