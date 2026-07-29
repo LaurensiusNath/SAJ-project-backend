@@ -19,3 +19,6 @@ cnc-pm-backend.exe
 Thumbs.db
 .vscode/
 .idea/
+
+# Claude Code local tool state
+.claude/

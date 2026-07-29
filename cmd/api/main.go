@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nathan/cnc-pm-backend/internal/config"
+	"github.com/nathan/cnc-pm-backend/internal/customer"
+	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
 )
 
 func main() {
@@ -29,6 +31,11 @@ func main() {
 
 	router := gin.Default()
 
+	customerRepo := customer.NewRepository(sqlcgen.New(dbPool))
+	customerService := customer.NewService(customerRepo)
+	customerHandler := customer.NewHandler(customerService)
+	customerHandler.RegisterRoutes(router.Group("/api/v1"))
+
 	// Health check endpoint - wajib ada untuk deployment (dipakai load balancer /
 	// orchestrator buat cek apakah service masih hidup)
 	router.GET("/health", func(c *gin.Context) {
@@ -41,9 +48,6 @@ func main() {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
 	})
-
-	// TODO: daftarkan route modul Customer di sini setelah handler-nya dibuat
-	// customerHandler.RegisterRoutes(router.Group("/api/v1"))
 
 	log.Printf("server berjalan di port %s", cfg.AppPort)
 	if err := router.Run(":" + cfg.AppPort); err != nil {
