@@ -1,0 +1,53 @@
+name: CI
+
+# Jalan di push ke main (jaga-jaga kalau ada yang push langsung) dan di
+# setiap pull request ke main - inilah yang muncul sebagai status check
+# di halaman PR, sebelum branch protection mengizinkan merge.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # internal/repository/sqlcgen/ sengaja di-gitignore (lihat README) -
+      # checkout yang bersih seperti di CI tidak punya folder ini sama
+      # sekali, jadi harus di-generate ulang sebelum step apapun yang
+      # meng-compile kode (test, build).
+      - name: Install sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+
+      - name: Generate sqlc code
+        run: sqlc generate
+
+      # Paling murah/cepat duluan (fail fast): kalau formatting saja
+      # belum rapi, tidak ada gunanya lanjut ke test/build.
+      - name: Check formatting (gofmt)
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "File berikut belum di-gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -v
+
+      - name: Build
+        run: go build ./...
