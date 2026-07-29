@@ -46,16 +46,16 @@ var (
 // (nullable di kolom DB) memakai pointer, bukan string kosong, supaya
 // "tidak diisi" dan "diisi string kosong" tetap bisa dibedakan.
 type Customer struct {
-	ID           uuid.UUID
-	Name         string
-	CustomerType CustomerType
-	Phone        *string
-	Email        *string
-	Address      *string
-	CompanyName  *string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    *time.Time
+	ID           uuid.UUID    `json:"id"`
+	Name         string       `json:"name"`
+	CustomerType CustomerType `json:"customer_type"`
+	Phone        *string      `json:"phone"`
+	Email        *string      `json:"email"`
+	Address      *string      `json:"address"`
+	CompanyName  *string      `json:"company_name"`
+	CreatedAt    time.Time    `json:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at"`
+	DeletedAt    *time.Time   `json:"deleted_at"`
 }
 
 // Validate menegakkan invariant domain yang harus selalu benar untuk
