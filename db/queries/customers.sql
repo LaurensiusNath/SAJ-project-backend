@@ -11,8 +11,19 @@ WHERE id = $1 AND deleted_at IS NULL;
 SELECT * FROM customers
 WHERE deleted_at IS NULL
   AND (name ILIKE '%' || sqlc.narg('search') || '%' OR sqlc.narg('search') IS NULL)
+  AND (customer_type = sqlc.narg('customer_type') OR sqlc.narg('customer_type') IS NULL)
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
+
+-- name: CountCustomers :one
+-- Filter di sini harus selalu sama persis dengan filter ListCustomers -
+-- ini query terpisah (bukan window function COUNT(*) OVER()) supaya
+-- masing-masing tetap query sederhana yang gampang di-EXPLAIN ANALYZE
+-- sendiri-sendiri.
+SELECT COUNT(*) FROM customers
+WHERE deleted_at IS NULL
+  AND (name ILIKE '%' || sqlc.narg('search') || '%' OR sqlc.narg('search') IS NULL)
+  AND (customer_type = sqlc.narg('customer_type') OR sqlc.narg('customer_type') IS NULL);
 
 -- name: UpdateCustomer :one
 UPDATE customers

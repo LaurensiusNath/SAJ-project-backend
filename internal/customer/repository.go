@@ -17,10 +17,19 @@ import (
 // service.go akan bergantung ke interface ini, BUKAN ke sqlcgen atau pgx
 // secara langsung - itu sebabnya semua tipe di signature-nya adalah tipe
 // domain (uuid.UUID, Customer, *string), bukan tipe milik driver database.
+// ListFilter dipakai bersama oleh List dan Count - keduanya HARUS difilter
+// dengan kriteria yang sama persis, supaya meta.total di response benar-benar
+// menghitung "total data yang match filter", bukan total keseluruhan tabel.
+type ListFilter struct {
+	Search       *string
+	CustomerType *CustomerType
+}
+
 type Repository interface {
 	Create(ctx context.Context, c Customer) (Customer, error)
 	GetByID(ctx context.Context, id uuid.UUID) (Customer, error)
-	List(ctx context.Context, search *string, limit, offset int32) ([]Customer, error)
+	List(ctx context.Context, filter ListFilter, limit, offset int32) ([]Customer, error)
+	Count(ctx context.Context, filter ListFilter) (int64, error)
 	Update(ctx context.Context, c Customer) (Customer, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 }
@@ -63,11 +72,12 @@ func (r *sqlcRepository) GetByID(ctx context.Context, id uuid.UUID) (Customer, e
 	return fromRow(row), nil
 }
 
-func (r *sqlcRepository) List(ctx context.Context, search *string, limit, offset int32) ([]Customer, error) {
+func (r *sqlcRepository) List(ctx context.Context, filter ListFilter, limit, offset int32) ([]Customer, error) {
 	rows, err := r.q.ListCustomers(ctx, sqlcgen.ListCustomersParams{
-		Limit:  limit,
-		Offset: offset,
-		Search: toPgText(search),
+		Limit:        limit,
+		Offset:       offset,
+		Search:       toPgText(filter.Search),
+		CustomerType: toPgTextFromCustomerType(filter.CustomerType),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list customers: %w", err)
@@ -77,6 +87,17 @@ func (r *sqlcRepository) List(ctx context.Context, search *string, limit, offset
 		customers[i] = fromRow(row)
 	}
 	return customers, nil
+}
+
+func (r *sqlcRepository) Count(ctx context.Context, filter ListFilter) (int64, error) {
+	total, err := r.q.CountCustomers(ctx, sqlcgen.CountCustomersParams{
+		Search:       toPgText(filter.Search),
+		CustomerType: toPgTextFromCustomerType(filter.CustomerType),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count customers: %w", err)
+	}
+	return total, nil
 }
 
 func (r *sqlcRepository) Update(ctx context.Context, c Customer) (Customer, error) {
@@ -124,6 +145,13 @@ func fromPgText(t pgtype.Text) *string {
 	}
 	v := t.String
 	return &v
+}
+
+func toPgTextFromCustomerType(t *CustomerType) pgtype.Text {
+	if t == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: string(*t), Valid: true}
 }
 
 func toPgUUID(id uuid.UUID) pgtype.UUID {

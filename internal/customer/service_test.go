@@ -2,6 +2,8 @@ package customer
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,12 +41,36 @@ func (f *fakeRepository) GetByID(_ context.Context, id uuid.UUID) (Customer, err
 	return c, nil
 }
 
-func (f *fakeRepository) List(_ context.Context, _ *string, _, _ int32) ([]Customer, error) {
+func (f *fakeRepository) matches(c Customer, filter ListFilter) bool {
+	if filter.Search != nil && !strings.Contains(strings.ToLower(c.Name), strings.ToLower(*filter.Search)) {
+		return false
+	}
+	if filter.CustomerType != nil && c.CustomerType != *filter.CustomerType {
+		return false
+	}
+	return true
+}
+
+func (f *fakeRepository) filtered(filter ListFilter) []Customer {
 	result := make([]Customer, 0, len(f.customers))
 	for _, c := range f.customers {
-		result = append(result, c)
+		if f.matches(c, filter) {
+			result = append(result, c)
+		}
 	}
-	return result, nil
+	sort.SliceStable(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result
+}
+
+func (f *fakeRepository) List(_ context.Context, filter ListFilter, limit, offset int32) ([]Customer, error) {
+	all := f.filtered(filter)
+	start := min(int(offset), len(all))
+	end := min(start+int(limit), len(all))
+	return all[start:end], nil
+}
+
+func (f *fakeRepository) Count(_ context.Context, filter ListFilter) (int64, error) {
+	return int64(len(f.filtered(filter))), nil
 }
 
 func (f *fakeRepository) Update(_ context.Context, c Customer) (Customer, error) {
@@ -113,6 +139,34 @@ func TestService_Create(t *testing.T) {
 			assert.Equal(t, tc.input.Name, got.Name)
 		})
 	}
+}
+
+func TestService_List_FiltersByCustomerTypeAndPaginates(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	ctx := context.Background()
+	for range 3 {
+		_, err := svc.Create(ctx, CreateInput{Name: "PT Badan Usaha", CustomerType: CustomerTypeBadanUsaha})
+		require.NoError(t, err)
+	}
+	_, err := svc.Create(ctx, CreateInput{Name: "Budi Perorangan", CustomerType: CustomerTypePerorangan})
+	require.NoError(t, err)
+
+	badanUsaha := CustomerTypeBadanUsaha
+	result, err := svc.List(ctx, ListParams{CustomerType: &badanUsaha, Page: 1, Limit: 2})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), result.Total, "total should count all matches, not just the current page")
+	assert.Len(t, result.Customers, 2, "page size should be capped at Limit")
+}
+
+func TestService_List_RejectsInvalidCustomerTypeFilter(t *testing.T) {
+	svc := NewService(newFakeRepository())
+	invalid := CustomerType("bukan-tipe-valid")
+
+	_, err := svc.List(context.Background(), ListParams{CustomerType: &invalid})
+
+	require.ErrorIs(t, err, ErrInvalidType)
 }
 
 func TestService_GetByID_NotFound(t *testing.T) {

@@ -58,12 +58,24 @@ func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (Customer, error) {
 // langsung - konversi ke offset ada di sini, supaya handler tidak perlu tahu
 // aritmatika pagination.
 type ListParams struct {
-	Search *string
-	Page   int32
-	Limit  int32
+	Search       *string
+	CustomerType *CustomerType
+	Page         int32
+	Limit        int32
 }
 
-func (s *Service) List(ctx context.Context, p ListParams) ([]Customer, error) {
+// ListResult membawa Total bersama Customers, supaya handler bisa mengisi
+// meta.total di response tanpa perlu query terpisah sendiri.
+type ListResult struct {
+	Customers []Customer
+	Total     int64
+}
+
+func (s *Service) List(ctx context.Context, p ListParams) (ListResult, error) {
+	if p.CustomerType != nil && !p.CustomerType.Valid() {
+		return ListResult{}, ErrInvalidType
+	}
+
 	limit := p.Limit
 	if limit <= 0 {
 		limit = 20
@@ -74,11 +86,17 @@ func (s *Service) List(ctx context.Context, p ListParams) ([]Customer, error) {
 	}
 	offset := (page - 1) * limit
 
-	customers, err := s.repo.List(ctx, p.Search, limit, offset)
+	filter := ListFilter{Search: p.Search, CustomerType: p.CustomerType}
+
+	customers, err := s.repo.List(ctx, filter, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("list customers: %w", err)
+		return ListResult{}, fmt.Errorf("list customers: %w", err)
 	}
-	return customers, nil
+	total, err := s.repo.Count(ctx, filter)
+	if err != nil {
+		return ListResult{}, fmt.Errorf("count customers: %w", err)
+	}
+	return ListResult{Customers: customers, Total: total}, nil
 }
 
 // UpdateInput sengaja tidak menyertakan CustomerType - sesuai UpdateCustomer

@@ -76,10 +76,6 @@ func (h *Handler) GetByID(c *gin.Context) {
 	httpresponse.Success(c, http.StatusOK, found)
 }
 
-// List belum mengisi meta.total (butuh query COUNT terpisah yang belum ada
-// di db/queries/customers.sql) dan belum mendukung filter customer_type
-// dari API contract - ditandai di sini sebagai gap yang perlu menyusul,
-// bukan diam-diam dianggap selesai.
 func (h *Handler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
@@ -87,17 +83,26 @@ func (h *Handler) List(c *gin.Context) {
 	if s := c.Query("search"); s != "" {
 		search = &s
 	}
+	var customerType *CustomerType
+	if ct := c.Query("customer_type"); ct != "" {
+		parsed := CustomerType(ct)
+		customerType = &parsed
+	}
 
-	customers, err := h.svc.List(c.Request.Context(), ListParams{
-		Search: search,
-		Page:   int32(page),
-		Limit:  int32(limit),
+	result, err := h.svc.List(c.Request.Context(), ListParams{
+		Search:       search,
+		CustomerType: customerType,
+		Page:         int32(page),
+		Limit:        int32(limit),
 	})
 	if err != nil {
 		h.respondError(c, err)
 		return
 	}
-	httpresponse.SuccessWithMeta(c, http.StatusOK, customers, gin.H{"page": page})
+	httpresponse.SuccessWithMeta(c, http.StatusOK, result.Customers, gin.H{
+		"page":  page,
+		"total": result.Total,
+	})
 }
 
 type updateCustomerRequest struct {
