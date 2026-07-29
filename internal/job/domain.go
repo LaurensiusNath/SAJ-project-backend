@@ -29,9 +29,10 @@ func (s JobStatus) Valid() bool {
 }
 
 var (
-	ErrNotFound      = errors.New("job not found")
-	ErrInvalidTitle  = errors.New("job title is required")
-	ErrInvalidStatus = errors.New("status must be one of: requested, scheduled, in_progress, completed, cancelled")
+	ErrNotFound        = errors.New("job not found")
+	ErrInvalidTitle    = errors.New("job title is required")
+	ErrInvalidStatus   = errors.New("status must be one of: requested, scheduled, in_progress, completed, cancelled")
+	ErrInvalidCustomer = errors.New("customer_id is required")
 )
 
 // Job adalah entity domain untuk satu work order. MachineID, TechnicianID,
@@ -56,6 +57,9 @@ type Job struct {
 }
 
 func (j Job) Validate() error {
+	if j.CustomerID == uuid.Nil {
+		return ErrInvalidCustomer
+	}
 	if j.Title == "" {
 		return ErrInvalidTitle
 	}
