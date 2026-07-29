@@ -51,8 +51,12 @@ func main() {
 
 	customerRepo := customer.NewRepository(queries)
 	customerService := customer.NewService(customerRepo)
-	customerHandler := customer.NewHandler(customerService)
+	machineRepo := customer.NewMachineRepository(queries)
+	machineService := customer.NewMachineService(machineRepo, customerRepo)
+	customerHandler := customer.NewHandler(customerService, machineService)
 	customerHandler.RegisterRoutes(router.Group("/api/v1"))
+	machineHandler := customer.NewMachineHandler(machineService)
+	machineHandler.RegisterRoutes(router.Group("/api/v1"))
 
 	jobRepo := job.NewRepository(queries)
 	jobService := job.NewService(jobRepo)
