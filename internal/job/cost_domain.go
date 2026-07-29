@@ -76,3 +76,15 @@ type CostTotals struct {
 	TotalSelling decimal.Decimal
 	TotalMargin  decimal.Decimal
 }
+
+// InvoiceCostTotals dipakai modul invoice (bukan modul ini) saat generate
+// invoice dari sebuah job - beda kebutuhan dari CostTotals di atas, jadi
+// sengaja dipisah, bukan dipakai bersama:
+//   - SubtotalAll: dasar PPN, SUM semua cost_type.
+//   - DPPPPh23: dasar PPh 23, SUM cost_type IN (labor, transport) saja -
+//     lihat api-contract.md Catatan Desain #2 untuk alasan spare_part
+//     dikecualikan.
+type InvoiceCostTotals struct {
+	SubtotalAll decimal.Decimal
+	DPPPPh23    decimal.Decimal
+}
