@@ -13,6 +13,7 @@ import (
 	"github.com/nathan/cnc-pm-backend/internal/customer"
 	"github.com/nathan/cnc-pm-backend/internal/job"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
+	"github.com/nathan/cnc-pm-backend/internal/settings"
 )
 
 func init() {
@@ -61,6 +62,11 @@ func main() {
 	jobCostService := job.NewCostService(jobCostRepo, jobRepo)
 	jobCostHandler := job.NewCostHandler(jobCostService)
 	jobCostHandler.RegisterRoutes(router.Group("/api/v1"))
+
+	settingsRepo := settings.NewRepository(queries)
+	settingsService := settings.NewService(settingsRepo)
+	settingsHandler := settings.NewHandler(settingsService)
+	settingsHandler.RegisterRoutes(router.Group("/api/v1"))
 
 	// Health check endpoint - wajib ada untuk deployment (dipakai load balancer /
 	// orchestrator buat cek apakah service masih hidup)
