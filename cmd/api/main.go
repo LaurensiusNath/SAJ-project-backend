@@ -10,6 +10,7 @@ import (
 
 	"github.com/nathan/cnc-pm-backend/internal/config"
 	"github.com/nathan/cnc-pm-backend/internal/customer"
+	"github.com/nathan/cnc-pm-backend/internal/job"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
 )
 
@@ -31,10 +32,17 @@ func main() {
 
 	router := gin.Default()
 
-	customerRepo := customer.NewRepository(sqlcgen.New(dbPool))
+	queries := sqlcgen.New(dbPool)
+
+	customerRepo := customer.NewRepository(queries)
 	customerService := customer.NewService(customerRepo)
 	customerHandler := customer.NewHandler(customerService)
 	customerHandler.RegisterRoutes(router.Group("/api/v1"))
+
+	jobRepo := job.NewRepository(queries)
+	jobService := job.NewService(jobRepo)
+	jobHandler := job.NewHandler(jobService)
+	jobHandler.RegisterRoutes(router.Group("/api/v1"))
 
 	// Health check endpoint - wajib ada untuk deployment (dipakai load balancer /
 	// orchestrator buat cek apakah service masih hidup)
