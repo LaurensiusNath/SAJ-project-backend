@@ -141,8 +141,14 @@ func (h *Handler) UpdateStatus(c *gin.Context) {
 	httpresponse.Success(c, http.StatusOK, updated)
 }
 
+// assignTechnicianRequest.ExpectedUpdatedAt wajib diisi client dengan
+// updated_at persis yang terakhir dia baca (dari GET /jobs/{id} sebelumnya) -
+// ini kontrak optimistic locking, lihat internal/job/repository.go/AssignTechnician
+// untuk alasannya. time.Time otomatis menerima format RFC3339 (format yang
+// sama dipakai json.Marshal saat serialize field updated_at di response).
 type assignTechnicianRequest struct {
-	TechnicianID uuid.UUID `json:"technician_id" binding:"required"`
+	TechnicianID      uuid.UUID `json:"technician_id" binding:"required"`
+	ExpectedUpdatedAt time.Time `json:"expected_updated_at" binding:"required"`
 }
 
 func (h *Handler) AssignTechnician(c *gin.Context) {
@@ -158,7 +164,7 @@ func (h *Handler) AssignTechnician(c *gin.Context) {
 		return
 	}
 
-	updated, err := h.svc.AssignTechnician(c.Request.Context(), id, req.TechnicianID)
+	updated, err := h.svc.AssignTechnician(c.Request.Context(), id, req.TechnicianID, req.ExpectedUpdatedAt)
 	if err != nil {
 		h.respondError(c, err)
 		return
@@ -181,6 +187,8 @@ func (h *Handler) respondError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		httpresponse.Error(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+	case errors.Is(err, ErrConflict):
+		httpresponse.Error(c, http.StatusConflict, "CONFLICT", err.Error())
 	case errors.Is(err, ErrInvalidTitle), errors.Is(err, ErrInvalidStatus), errors.Is(err, ErrInvalidCustomer), errors.Is(err, ErrInvalidReference):
 		httpresponse.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
 	default:

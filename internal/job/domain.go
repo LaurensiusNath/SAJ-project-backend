@@ -36,6 +36,10 @@ var (
 	// ErrInvalidReference: customer_id/machine_id/technician_id menunjuk ke
 	// baris yang tidak ada di tabel referensinya (foreign key violation).
 	ErrInvalidReference = errors.New("referenced record does not exist")
+	// ErrConflict: optimistic locking gagal - job ini sudah diubah pihak lain
+	// sejak client terakhir membaca updated_at-nya (lihat AssignTechnician
+	// di repository.go untuk kenapa ini dipakai, bukan pessimistic lock).
+	ErrConflict = errors.New("job was modified by someone else - refetch and retry with the latest updated_at")
 )
 
 // Job adalah entity domain untuk satu work order. MachineID, TechnicianID,

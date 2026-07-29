@@ -114,8 +114,12 @@ func (s *Service) UpdateStatus(ctx context.Context, id uuid.UUID, status JobStat
 	return updated, nil
 }
 
-func (s *Service) AssignTechnician(ctx context.Context, id, technicianID uuid.UUID) (Job, error) {
-	updated, err := s.repo.AssignTechnician(ctx, id, technicianID)
+// AssignTechnician mensyaratkan expectedUpdatedAt (bukan opsional) - lihat
+// repository.go untuk kenapa optimistic locking dipilih di sini. Membuatnya
+// opsional akan meniadakan jaminannya sendiri (client yang malas bisa selalu
+// melewatinya, race-nya kembali ada diam-diam).
+func (s *Service) AssignTechnician(ctx context.Context, id, technicianID uuid.UUID, expectedUpdatedAt time.Time) (Job, error) {
+	updated, err := s.repo.AssignTechnician(ctx, id, technicianID, expectedUpdatedAt)
 	if err != nil {
 		return Job{}, fmt.Errorf("assign technician: %w", err)
 	}

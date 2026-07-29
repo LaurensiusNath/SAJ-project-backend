@@ -11,6 +11,7 @@ import (
 
 	"github.com/nathan/cnc-pm-backend/internal/config"
 	"github.com/nathan/cnc-pm-backend/internal/customer"
+	"github.com/nathan/cnc-pm-backend/internal/invoice"
 	"github.com/nathan/cnc-pm-backend/internal/job"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
 	"github.com/nathan/cnc-pm-backend/internal/settings"
@@ -67,6 +68,13 @@ func main() {
 	settingsService := settings.NewService(settingsRepo)
 	settingsHandler := settings.NewHandler(settingsService)
 	settingsHandler.RegisterRoutes(router.Group("/api/v1"))
+
+	// invoice.NewRepository butuh dbPool (bukan cuma queries) - CreateFromJob
+	// dan RecordPayment membuka transaksi sendiri (lihat internal/invoice/repository.go).
+	invoiceRepo := invoice.NewRepository(dbPool, queries)
+	invoiceService := invoice.NewService(invoiceRepo)
+	invoiceHandler := invoice.NewHandler(invoiceService)
+	invoiceHandler.RegisterRoutes(router.Group("/api/v1"))
 
 	// Health check endpoint - wajib ada untuk deployment (dipakai load balancer /
 	// orchestrator buat cek apakah service masih hidup)

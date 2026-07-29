@@ -15,6 +15,7 @@ type CostRepository interface {
 	ListByJob(ctx context.Context, jobID uuid.UUID) ([]JobCost, error)
 	Totals(ctx context.Context, jobID uuid.UUID) (CostTotals, error)
 	Delete(ctx context.Context, jobID, costID uuid.UUID) error
+	InvoiceTotals(ctx context.Context, jobID uuid.UUID) (InvoiceCostTotals, error)
 }
 
 type sqlcCostRepository struct {
@@ -65,6 +66,17 @@ func (r *sqlcCostRepository) Totals(ctx context.Context, jobID uuid.UUID) (CostT
 	return CostTotals{
 		TotalSelling: pgconv.FromNumeric(row.TotalSelling),
 		TotalMargin:  pgconv.FromNumeric(row.TotalMargin),
+	}, nil
+}
+
+func (r *sqlcCostRepository) InvoiceTotals(ctx context.Context, jobID uuid.UUID) (InvoiceCostTotals, error) {
+	row, err := r.q.JobCostInvoiceTotals(ctx, pgconv.ToUUID(jobID))
+	if err != nil {
+		return InvoiceCostTotals{}, fmt.Errorf("job cost invoice totals: %w", err)
+	}
+	return InvoiceCostTotals{
+		SubtotalAll: pgconv.FromNumeric(row.SubtotalAll),
+		DPPPPh23:    pgconv.FromNumeric(row.DppPph23),
 	}, nil
 }
 

@@ -52,6 +52,21 @@ func (f *fakeCostRepository) Totals(_ context.Context, jobID uuid.UUID) (CostTot
 	return CostTotals{TotalSelling: totalSelling, TotalMargin: totalMargin}, nil
 }
 
+func (f *fakeCostRepository) InvoiceTotals(_ context.Context, jobID uuid.UUID) (InvoiceCostTotals, error) {
+	subtotalAll := decimal.Zero
+	dppPph23 := decimal.Zero
+	for _, c := range f.costs {
+		if c.JobID != jobID {
+			continue
+		}
+		subtotalAll = subtotalAll.Add(c.Subtotal)
+		if c.CostType == CostTypeLabor || c.CostType == CostTypeTransport {
+			dppPph23 = dppPph23.Add(c.Subtotal)
+		}
+	}
+	return InvoiceCostTotals{SubtotalAll: subtotalAll, DPPPPh23: dppPph23}, nil
+}
+
 func (f *fakeCostRepository) Delete(_ context.Context, jobID, costID uuid.UUID) error {
 	c, ok := f.costs[costID]
 	if !ok || c.JobID != jobID {
