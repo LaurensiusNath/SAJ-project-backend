@@ -18,9 +18,14 @@ func NewMachineHandler(svc *MachineService) *MachineHandler {
 	return &MachineHandler{svc: svc}
 }
 
+// RegisterRoutes pakai ":id" (bukan ":customer_id") - gin/httprouter tidak
+// mengizinkan nama wildcard berbeda di node path yang sama ("/customers/:id"
+// dari customer.Handler vs "/customers/:customer_id" di sini akan panic
+// saat startup: "conflicts with existing wildcard"). Jadi walau secara
+// semantik ini "customer_id", parameternya tetap dibaca lewat c.Param("id").
 func (h *MachineHandler) RegisterRoutes(rg *gin.RouterGroup) {
-	rg.POST("/customers/:customer_id/machines", h.Create)
-	rg.GET("/customers/:customer_id/machines", h.List)
+	rg.POST("/customers/:id/machines", h.Create)
+	rg.GET("/customers/:id/machines", h.List)
 }
 
 type createMachineRequest struct {
@@ -31,7 +36,7 @@ type createMachineRequest struct {
 }
 
 func (h *MachineHandler) Create(c *gin.Context) {
-	customerID, err := uuid.Parse(c.Param("customer_id"))
+	customerID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		httpresponse.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid customer id")
 		return
@@ -58,7 +63,7 @@ func (h *MachineHandler) Create(c *gin.Context) {
 }
 
 func (h *MachineHandler) List(c *gin.Context) {
-	customerID, err := uuid.Parse(c.Param("customer_id"))
+	customerID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		httpresponse.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid customer id")
 		return
