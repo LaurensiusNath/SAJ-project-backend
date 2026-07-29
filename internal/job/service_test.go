@@ -15,17 +15,28 @@ import (
 // internal/customer/service_test.go.
 type fakeRepository struct {
 	jobs map[uuid.UUID]Job
+	tick int
 }
 
 func newFakeRepository() *fakeRepository {
 	return &fakeRepository{jobs: make(map[uuid.UUID]Job)}
 }
 
+// nextTimestamp menghindari time.Now() dipanggil dua kali super cepat
+// (mis. Create lalu langsung AssignTechnician di test yang sama) dan
+// menghasilkan nilai yang identik karena resolusi jam OS - itu akan
+// membuat test optimistic locking salah lolos (staleUpdatedAt kebetulan
+// masih "match" walau sudah ada perubahan).
+func (f *fakeRepository) nextTimestamp() time.Time {
+	f.tick++
+	return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(f.tick) * time.Second)
+}
+
 func (f *fakeRepository) Create(_ context.Context, j Job) (Job, error) {
 	j.ID = uuid.New()
 	j.JobCode = "JOB-TEST-0001"
-	j.CreatedAt = time.Now()
-	j.UpdatedAt = time.Now()
+	j.CreatedAt = f.nextTimestamp()
+	j.UpdatedAt = j.CreatedAt
 	f.jobs[j.ID] = j
 	return j, nil
 }
@@ -81,12 +92,16 @@ func (f *fakeRepository) UpdateStatus(_ context.Context, id uuid.UUID, status Jo
 	return j, nil
 }
 
-func (f *fakeRepository) AssignTechnician(_ context.Context, id, technicianID uuid.UUID) (Job, error) {
+func (f *fakeRepository) AssignTechnician(_ context.Context, id, technicianID uuid.UUID, expectedUpdatedAt time.Time) (Job, error) {
 	j, ok := f.jobs[id]
 	if !ok {
 		return Job{}, ErrNotFound
 	}
+	if !j.UpdatedAt.Equal(expectedUpdatedAt) {
+		return Job{}, ErrConflict
+	}
 	j.TechnicianID = &technicianID
+	j.UpdatedAt = f.nextTimestamp()
 	f.jobs[id] = j
 	return j, nil
 }
@@ -202,7 +217,7 @@ func TestService_AssignTechnician(t *testing.T) {
 	require.NoError(t, err)
 	technicianID := uuid.New()
 
-	updated, err := svc.AssignTechnician(context.Background(), created.ID, technicianID)
+	updated, err := svc.AssignTechnician(context.Background(), created.ID, technicianID, created.UpdatedAt)
 
 	require.NoError(t, err)
 	require.NotNil(t, updated.TechnicianID)
@@ -212,7 +227,27 @@ func TestService_AssignTechnician(t *testing.T) {
 func TestService_AssignTechnician_NotFound(t *testing.T) {
 	svc := NewService(newFakeRepository())
 
-	_, err := svc.AssignTechnician(context.Background(), uuid.New(), uuid.New())
+	_, err := svc.AssignTechnician(context.Background(), uuid.New(), uuid.New(), time.Now())
 
 	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// TestService_AssignTechnician_ConflictOnStaleUpdatedAt membuktikan
+// optimistic locking: admin B mengirim expected_updated_at yang sudah usang
+// (karena admin A sudah assign duluan) harus ditolak dengan ErrConflict,
+// bukan diam-diam menimpa pilihan admin A.
+func TestService_AssignTechnician_ConflictOnStaleUpdatedAt(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	created, err := svc.Create(context.Background(), CreateInput{CustomerID: uuid.New(), Title: "Servis"})
+	require.NoError(t, err)
+	staleUpdatedAt := created.UpdatedAt
+
+	technicianA := uuid.New()
+	_, err = svc.AssignTechnician(context.Background(), created.ID, technicianA, staleUpdatedAt)
+	require.NoError(t, err, "admin A assigns first using the updated_at both admins originally read")
+
+	technicianB := uuid.New()
+	_, err = svc.AssignTechnician(context.Background(), created.ID, technicianB, staleUpdatedAt)
+	require.ErrorIs(t, err, ErrConflict, "admin B still holds the pre-A updated_at, so this must be rejected instead of silently overwriting")
 }

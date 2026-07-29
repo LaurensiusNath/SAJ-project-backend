@@ -43,7 +43,12 @@ WHERE id = $1
 RETURNING *;
 
 -- name: AssignTechnician :one
+-- Optimistic locking: klausa "AND updated_at = $3" cuma berhasil mengubah
+-- baris kalau updated_at masih persis sama dengan yang terakhir dibaca
+-- client. Kalau ada admin lain yang assign duluan (updated_at sudah
+-- berubah), query ini me-return 0 baris (bukan error) - repository.go
+-- yang membedakan itu "job tidak ada" vs "job ada tapi datanya sudah usang".
 UPDATE jobs
 SET technician_id = $2, updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND updated_at = $3
 RETURNING *;

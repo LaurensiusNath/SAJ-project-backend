@@ -73,6 +73,12 @@ func FromTimestamptz(t pgtype.Timestamptz) time.Time {
 	return t.Time
 }
 
+// ToTimestamptz dipakai untuk parameter query timestamptz yang NOT NULL,
+// mis. expected_updated_at pada optimistic locking (lihat job.AssignTechnician).
+func ToTimestamptz(t time.Time) pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: t, Valid: true}
+}
+
 // ToNumeric/FromNumeric konversi decimal.Decimal <-> pgtype.Numeric tanpa
 // pernah singgah ke float64 - keduanya sama-sama merepresentasikan angka
 // sebagai (coefficient, exponent), jadi konversinya persis/lossless. Ini

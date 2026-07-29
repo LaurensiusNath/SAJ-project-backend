@@ -43,7 +43,11 @@ type Repository interface {
 	List(ctx context.Context, filter ListFilter, limit, offset int32) ([]Job, error)
 	Count(ctx context.Context, filter ListFilter) (int64, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status JobStatus, completedDate *time.Time) (Job, error)
-	AssignTechnician(ctx context.Context, id uuid.UUID, technicianID uuid.UUID) (Job, error)
+	// AssignTechnician pakai optimistic locking: expectedUpdatedAt harus
+	// persis sama dengan jobs.updated_at saat ini, kalau tidak (sudah diubah
+	// pihak lain) mengembalikan ErrConflict. Lihat penjelasan lengkap di
+	// badan fungsi.
+	AssignTechnician(ctx context.Context, id uuid.UUID, technicianID uuid.UUID, expectedUpdatedAt time.Time) (Job, error)
 }
 
 type sqlcRepository struct {
@@ -141,14 +145,37 @@ func (r *sqlcRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status 
 	return fromRow(row), nil
 }
 
-func (r *sqlcRepository) AssignTechnician(ctx context.Context, id, technicianID uuid.UUID) (Job, error) {
+// AssignTechnician: dua admin yang assign teknisi berbeda ke job yang sama
+// nyaris bersamaan tidak akan crash atau deadlock - keduanya sama-sama
+// "berhasil" secara SQL (last write wins secara alami). Masalahnya justru
+// itu: TIDAK ADA yang tahu tulisannya baru saja ditimpa pihak lain (silent
+// overwrite), beda dari kasus payment yang butuh SUM ulang dari data yang
+// konsisten.
+//
+// Pessimistic lock (SELECT ... FOR UPDATE, seperti di invoice.RecordPayment)
+// TIDAK menyelesaikan masalah ini - dia cuma menyerialkan urutan tulis,
+// request kedua tetap menimpa nilai request pertama begitu lock dilepas,
+// cuma bergiliran, bukan barengan. Yang benar-benar dibutuhkan adalah
+// optimistic locking: client wajib mengirim updated_at yang terakhir dia
+// baca (expectedUpdatedAt); kalau job sudah berubah sejak itu, UPDATE ini
+// mengenai 0 baris dan kita kembalikan ErrConflict (409) - klien tahu ada
+// konflik, bisa refetch dan putuskan sendiri (retry/timpa/batal), bukan
+// diam-diam kalah.
+func (r *sqlcRepository) AssignTechnician(ctx context.Context, id, technicianID uuid.UUID, expectedUpdatedAt time.Time) (Job, error) {
 	row, err := r.q.AssignTechnician(ctx, sqlcgen.AssignTechnicianParams{
 		ID:           pgconv.ToUUID(id),
 		TechnicianID: pgconv.ToUUID(technicianID),
+		UpdatedAt:    pgconv.ToTimestamptz(expectedUpdatedAt),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Job{}, ErrNotFound
+			// 0 baris ter-update bisa berarti dua hal: job memang tidak ada,
+			// atau job ada tapi updated_at-nya sudah berubah (konflik). Perlu
+			// satu SELECT tambahan untuk membedakan keduanya.
+			if _, getErr := r.GetByID(ctx, id); getErr != nil {
+				return Job{}, getErr
+			}
+			return Job{}, ErrConflict
 		}
 		if mapped := asInvalidReference(err); mapped != nil {
 			return Job{}, mapped

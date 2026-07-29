@@ -103,6 +103,23 @@ List komponen biaya + `meta` tambahan: `total_selling` (untuk subtotal invoice) 
 ### `DELETE /jobs/{id}/costs/{cost_id}`
 Tidak berubah.
 
+### `PATCH /jobs/{id}/assign` – **diperbarui: optimistic locking**
+Dua admin bisa mencoba assign teknisi berbeda ke job yang sama nyaris bersamaan – tanpa pengaman, salah satu perubahan akan diam-diam tertimpa tanpa ada yang tahu terjadi konflik. Untuk mencegah itu, endpoint ini sekarang mensyaratkan `expected_updated_at`: nilai `updated_at` job yang terakhir dibaca client (dari response `GET /jobs/{id}` sebelumnya).
+
+Request body:
+```json
+{
+  "technician_id": "uuid",
+  "expected_updated_at": "2026-07-29T21:38:12.671472+07:00"
+}
+```
+
+Kalau `expected_updated_at` sudah tidak sama dengan `jobs.updated_at` saat ini (artinya job sudah diubah pihak lain sejak client membacanya), backend menolak dengan:
+```json
+{ "success": false, "error": { "code": "CONFLICT", "message": "job was modified by someone else - refetch and retry with the latest updated_at" } }
+```
+status HTTP `409`. Client diharapkan re-fetch job terbaru dan memutuskan sendiri (retry/batal), bukan menimpa begitu saja.
+
 ---
 
 ## 3. Modul Costing / Invoice – **paling banyak berubah**
