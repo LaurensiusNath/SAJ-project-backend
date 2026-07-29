@@ -5,7 +5,10 @@ RETURNING *;
 
 -- name: CountJobsByYear :one
 -- Dipakai untuk generate job_code (JOB-<tahun>-<urutan>) - lihat repository.go.
-SELECT COUNT(*) FROM jobs WHERE EXTRACT(YEAR FROM created_at) = $1;
+-- Cast eksplisit ke ::int, kalau tidak sqlc salah infer tipe parameter
+-- jadi pgtype.Timestamptz (ikut tipe kolom created_at) padahal yang
+-- dibandingkan hasil EXTRACT() yang berupa angka tahun biasa.
+SELECT COUNT(*) FROM jobs WHERE EXTRACT(YEAR FROM created_at)::int = sqlc.arg(year)::int;
 
 -- name: GetJobByID :one
 SELECT * FROM jobs WHERE id = $1;
