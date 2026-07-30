@@ -4,12 +4,17 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
+
 	"github.com/nathan/cnc-pm-backend/internal/pgconv"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
 )
 
 type Repository interface {
 	Create(ctx context.Context, n Notification) (Notification, error)
+	// ExistsSentToday dipakai job.ReminderService sebagai idempotency check -
+	// lihat db/queries/notifications.sql untuk alasannya.
+	ExistsSentToday(ctx context.Context, jobID uuid.UUID, subject string) (bool, error)
 }
 
 type sqlcRepository struct {
@@ -35,6 +40,17 @@ func (r *sqlcRepository) Create(ctx context.Context, n Notification) (Notificati
 		return Notification{}, fmt.Errorf("insert notification log: %w", err)
 	}
 	return fromRow(row), nil
+}
+
+func (r *sqlcRepository) ExistsSentToday(ctx context.Context, jobID uuid.UUID, subject string) (bool, error) {
+	exists, err := r.q.ExistsNotificationSentToday(ctx, sqlcgen.ExistsNotificationSentTodayParams{
+		JobID:   pgconv.ToUUID(jobID),
+		Subject: pgconv.ToText(&subject),
+	})
+	if err != nil {
+		return false, fmt.Errorf("check notification sent today: %w", err)
+	}
+	return exists, nil
 }
 
 func fromRow(row sqlcgen.Notification) Notification {

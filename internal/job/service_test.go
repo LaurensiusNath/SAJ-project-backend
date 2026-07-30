@@ -158,6 +158,16 @@ func (f *fakeRepository) Count(_ context.Context, filter ListFilter) (int64, err
 	return int64(len(f.filtered(filter))), nil
 }
 
+func (f *fakeRepository) ListNeedingReminderCheck(_ context.Context) ([]Job, error) {
+	var result []Job
+	for _, j := range f.jobs {
+		if j.Status != StatusCompleted && j.Status != StatusCancelled && j.ScheduledDate != nil {
+			result = append(result, j)
+		}
+	}
+	return result, nil
+}
+
 func (f *fakeRepository) UpdateStatus(_ context.Context, id uuid.UUID, status JobStatus, completedDate *time.Time) (Job, error) {
 	j, ok := f.jobs[id]
 	if !ok {

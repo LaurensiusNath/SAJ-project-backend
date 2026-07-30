@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,6 +32,10 @@ type fakeRepository struct {
 func (f *fakeRepository) Create(_ context.Context, n Notification) (Notification, error) {
 	f.created = append(f.created, n)
 	return n, nil
+}
+
+func (f *fakeRepository) ExistsSentToday(context.Context, uuid.UUID, string) (bool, error) {
+	return false, nil
 }
 
 func TestService_SendEmail_Success(t *testing.T) {

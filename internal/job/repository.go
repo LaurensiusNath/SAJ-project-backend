@@ -48,6 +48,9 @@ type Repository interface {
 	// pihak lain) mengembalikan ErrConflict. Lihat penjelasan lengkap di
 	// badan fungsi.
 	AssignTechnician(ctx context.Context, id uuid.UUID, technicianID uuid.UUID, expectedUpdatedAt time.Time) (Job, error)
+	// ListNeedingReminderCheck dipakai job.ReminderService - job yang
+	// jadwalnya sudah lewat, hari ini, atau besok, dan belum completed/cancelled.
+	ListNeedingReminderCheck(ctx context.Context) ([]Job, error)
 }
 
 type sqlcRepository struct {
@@ -183,6 +186,18 @@ func (r *sqlcRepository) AssignTechnician(ctx context.Context, id, technicianID 
 		return Job{}, fmt.Errorf("assign technician: %w", err)
 	}
 	return fromRow(row), nil
+}
+
+func (r *sqlcRepository) ListNeedingReminderCheck(ctx context.Context) ([]Job, error) {
+	rows, err := r.q.ListJobsNeedingReminderCheck(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list jobs needing reminder check: %w", err)
+	}
+	jobs := make([]Job, len(rows))
+	for i, row := range rows {
+		jobs[i] = fromRow(row)
+	}
+	return jobs, nil
 }
 
 // toPgTextFromStatus tetap khusus di sini (bukan masuk pgconv), sama alasan

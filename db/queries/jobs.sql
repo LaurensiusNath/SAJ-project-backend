@@ -42,6 +42,17 @@ SET status = $2, completed_date = $3, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: ListJobsNeedingReminderCheck :many
+-- Dipakai job.ReminderService (jalan periodik lewat ticker di main.go) -
+-- mengambil job yang jadwalnya sudah lewat, hari ini, atau besok, dan
+-- statusnya belum final (completed/cancelled). Klasifikasi "overdue vs
+-- besok vs hari ini" dilakukan di Go (reminder.go), bukan di sini, supaya
+-- teksnya gampang diubah tanpa migration/query baru.
+SELECT * FROM jobs
+WHERE status NOT IN ('completed', 'cancelled')
+  AND scheduled_date IS NOT NULL
+  AND scheduled_date <= CURRENT_DATE + INTERVAL '1 day';
+
 -- name: AssignTechnician :one
 -- Optimistic locking: klausa "AND updated_at = $3" cuma berhasil mengubah
 -- baris kalau updated_at masih persis sama dengan yang terakhir dibaca
