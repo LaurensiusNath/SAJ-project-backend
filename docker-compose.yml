@@ -20,11 +20,36 @@ services:
     ports:
       - "6379:6379"
 
+  # migrate menjalankan `migrate up` sekali lalu keluar (bukan service
+  # jangka panjang) - backend menunggu ini selesai SUKSES
+  # (service_completed_successfully) sebelum start, supaya tidak pernah
+  # connect ke database yang tabelnya belum ada. Sebelumnya tidak ada
+  # service ini sama sekali (ditemukan lewat audit 2026-07-30) - backend
+  # bisa start duluan lalu gagal/berjalan di atas skema kosong.
+  migrate:
+    image: migrate/migrate:v4.17.1
+    volumes:
+      - ./db/migrations:/migrations
+    command: ["-path", "/migrations", "-database", "postgres://cncuser:cncpassword@postgres:5432/cnc_pm_db?sslmode=disable", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   backend:
     build:
       context: .
       dockerfile: Dockerfile
     env_file: .env
+    # DATABASE_URL/REDIS_URL di .env memakai "localhost" - itu benar untuk
+    # `go run` di host (Postgres/Redis dipetakan ke localhost lewat ports:
+    # di atas), tapi SALAH dari dalam container backend (di jaringan
+    # docker compose, "localhost" merujuk ke container itu sendiri, bukan
+    # container postgres/redis). Override eksplisit di sini supaya backend
+    # memakai hostname service ("postgres", "redis"), bukan nilai dari
+    # .env yang ditujukan untuk konteks host.
+    environment:
+      DATABASE_URL: postgres://cncuser:cncpassword@postgres:5432/cnc_pm_db?sslmode=disable
+      REDIS_URL: redis:6379
     ports:
       - "8080:8080"
     depends_on:
@@ -32,6 +57,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:
