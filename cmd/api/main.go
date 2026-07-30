@@ -112,11 +112,7 @@ func main() {
 	jobHandler := job.NewHandler(jobService)
 	jobHandler.RegisterRoutes(protectedGroup)
 
-	// Reminder scheduled_date jalan di goroutine terpisah, bukan lewat HTTP
-	// request - lihat runReminderScheduler untuk alasan interval & cek
-	// pertama langsung saat startup.
 	reminderService := job.NewReminderService(jobRepo, customerRepo, notifier, notificationRepo)
-	go runReminderScheduler(reminderService)
 
 	jobCostService := job.NewCostService(jobCostRepo, jobRepo)
 	jobCostHandler := job.NewCostHandler(jobCostService)
@@ -133,6 +129,15 @@ func main() {
 	invoiceService := invoice.NewService(invoiceRepo)
 	invoiceHandler := invoice.NewHandler(invoiceService)
 	invoiceHandler.RegisterRoutes(protectedGroup)
+
+	// Reminder scheduled_date DAN auto-transition invoice overdue jalan di
+	// goroutine terpisah lewat ticker yang SAMA (bukan dua infrastruktur
+	// terjadwal) - lihat runReminderScheduler untuk alasan interval & cek
+	// pertama langsung saat startup. invoice.Service.MarkOverdue tidak bisa
+	// jadi bagian dari job.ReminderService sendiri karena invoice package
+	// sudah mengimpor job (circular import kalau dibalik) - main.go yang
+	// menjembatani keduanya di satu ticker.
+	go runReminderScheduler(reminderService, invoiceService)
 
 	// Health check endpoint - wajib ada untuk deployment (dipakai load balancer /
 	// orchestrator buat cek apakah service masih hidup)
@@ -153,24 +158,34 @@ func main() {
 	}
 }
 
-// runReminderScheduler menjalankan ReminderService.CheckAndNotify secara
-// periodik. Cek pertama terjadi SEGERA saat startup (bukan menunggu satu
-// interval dulu) - reminder yang jadwalnya sudah due tidak perlu menunggu
-// sampai tick pertama lewat, dan ini juga yang membuat fitur ini gampang
-// diverifikasi manual (restart server = cek langsung jalan).
+// runReminderScheduler menjalankan job.ReminderService.CheckAndNotify DAN
+// invoice.Service.MarkOverdue di ticker yang SAMA - satu infrastruktur
+// terjadwal dipakai bareng oleh dua urusan yang beda modul (job's
+// scheduled_date reminder, invoice's overdue auto-transition), bukan dua
+// ticker terpisah. Cek pertama terjadi SEGERA saat startup (bukan menunggu
+// satu interval dulu) - baik reminder maupun invoice yang sudah due tidak
+// perlu menunggu sampai tick pertama lewat, dan ini juga yang membuat
+// fitur ini gampang diverifikasi manual (restart server = cek langsung
+// jalan).
 //
-// Interval 1 jam dipilih karena ExistsSentToday sudah menjamin maksimal
-// satu email per job per jenis reminder per hari - jadi presisi ke menit
-// tidak dibutuhkan, cukup "dalam sejam sejak due boleh sedikit telat".
+// Interval 1 jam dipilih karena ExistsSentToday (job) dan kondisi WHERE
+// status='sent' (invoice, idempotent by nature) sama-sama tidak butuh
+// presisi ke menit - cukup "dalam sejam sejak due boleh sedikit telat".
 // time.Ticker standar dipakai, bukan library cron (mis. robfig/cron) -
 // cukup untuk kebutuhan project ini, tidak butuh jadwal presisi/multi-job
 // yang jadi alasan utama pakai library cron sungguhan.
-func runReminderScheduler(svc *job.ReminderService) {
+func runReminderScheduler(jobSvc *job.ReminderService, invoiceSvc *invoice.Service) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 	for {
-		if err := svc.CheckAndNotify(context.Background()); err != nil {
+		ctx := context.Background()
+		if err := jobSvc.CheckAndNotify(ctx); err != nil {
 			log.Printf("reminder check gagal: %v", err)
+		}
+		if overdue, err := invoiceSvc.MarkOverdue(ctx); err != nil {
+			log.Printf("mark overdue invoices gagal: %v", err)
+		} else if len(overdue) > 0 {
+			log.Printf("%d invoice ditandai overdue", len(overdue))
 		}
 		<-ticker.C
 	}
