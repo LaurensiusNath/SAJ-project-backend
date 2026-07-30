@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -103,6 +104,12 @@ func main() {
 	jobHandler := job.NewHandler(jobService)
 	jobHandler.RegisterRoutes(protectedGroup)
 
+	// Reminder scheduled_date jalan di goroutine terpisah, bukan lewat HTTP
+	// request - lihat runReminderScheduler untuk alasan interval & cek
+	// pertama langsung saat startup.
+	reminderService := job.NewReminderService(jobRepo, customerRepo, notifier, notificationRepo)
+	go runReminderScheduler(reminderService)
+
 	jobCostRepo := job.NewCostRepository(queries)
 	jobCostService := job.NewCostService(jobCostRepo, jobRepo)
 	jobCostHandler := job.NewCostHandler(jobCostService)
@@ -136,5 +143,28 @@ func main() {
 	log.Printf("server berjalan di port %s", cfg.AppPort)
 	if err := router.Run(":" + cfg.AppPort); err != nil {
 		log.Fatalf("server gagal jalan: %v", err)
+	}
+}
+
+// runReminderScheduler menjalankan ReminderService.CheckAndNotify secara
+// periodik. Cek pertama terjadi SEGERA saat startup (bukan menunggu satu
+// interval dulu) - reminder yang jadwalnya sudah due tidak perlu menunggu
+// sampai tick pertama lewat, dan ini juga yang membuat fitur ini gampang
+// diverifikasi manual (restart server = cek langsung jalan).
+//
+// Interval 1 jam dipilih karena ExistsSentToday sudah menjamin maksimal
+// satu email per job per jenis reminder per hari - jadi presisi ke menit
+// tidak dibutuhkan, cukup "dalam sejam sejak due boleh sedikit telat".
+// time.Ticker standar dipakai, bukan library cron (mis. robfig/cron) -
+// cukup untuk kebutuhan project ini, tidak butuh jadwal presisi/multi-job
+// yang jadi alasan utama pakai library cron sungguhan.
+func runReminderScheduler(svc *job.ReminderService) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for {
+		if err := svc.CheckAndNotify(context.Background()); err != nil {
+			log.Printf("reminder check gagal: %v", err)
+		}
+		<-ticker.C
 	}
 }
