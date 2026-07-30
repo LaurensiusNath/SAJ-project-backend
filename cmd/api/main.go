@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -14,6 +15,7 @@ import (
 	"github.com/nathan/cnc-pm-backend/internal/customer"
 	"github.com/nathan/cnc-pm-backend/internal/invoice"
 	"github.com/nathan/cnc-pm-backend/internal/job"
+	"github.com/nathan/cnc-pm-backend/internal/notification"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
 	"github.com/nathan/cnc-pm-backend/internal/settings"
 	"github.com/nathan/cnc-pm-backend/internal/user"
@@ -50,6 +52,13 @@ func main() {
 	router := gin.Default()
 
 	queries := sqlcgen.New(dbPool)
+
+	if cfg.SMTPHost == "" {
+		log.Println("PERINGATAN: SMTP_HOST kosong - semua notifikasi email akan gagal terkirim (tetap tercatat di tabel notifications)")
+	}
+	notificationRepo := notification.NewRepository(queries)
+	mailer := notification.NewSMTPMailer(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
+	notifier := notification.NewService(notificationRepo, mailer)
 
 	// authService dibuat lebih dulu - dipakai baik untuk mendaftarkan
 	// POST /auth/login (publik) maupun untuk middleware RequireAuth yang
@@ -91,9 +100,15 @@ func main() {
 	machineHandler.RegisterRoutes(protectedGroup)
 
 	jobRepo := job.NewRepository(queries)
-	jobService := job.NewService(jobRepo)
+	jobService := job.NewService(jobRepo, customerRepo, userRepo, notifier)
 	jobHandler := job.NewHandler(jobService)
 	jobHandler.RegisterRoutes(protectedGroup)
+
+	// Reminder scheduled_date jalan di goroutine terpisah, bukan lewat HTTP
+	// request - lihat runReminderScheduler untuk alasan interval & cek
+	// pertama langsung saat startup.
+	reminderService := job.NewReminderService(jobRepo, customerRepo, notifier, notificationRepo)
+	go runReminderScheduler(reminderService)
 
 	jobCostRepo := job.NewCostRepository(queries)
 	jobCostService := job.NewCostService(jobCostRepo, jobRepo)
@@ -107,7 +122,7 @@ func main() {
 
 	// invoice.NewRepository butuh dbPool (bukan cuma queries) - CreateFromJob
 	// dan RecordPayment membuka transaksi sendiri (lihat internal/invoice/repository.go).
-	invoiceRepo := invoice.NewRepository(dbPool, queries)
+	invoiceRepo := invoice.NewRepository(dbPool, queries, notifier)
 	invoiceService := invoice.NewService(invoiceRepo)
 	invoiceHandler := invoice.NewHandler(invoiceService)
 	invoiceHandler.RegisterRoutes(protectedGroup)
@@ -128,5 +143,28 @@ func main() {
 	log.Printf("server berjalan di port %s", cfg.AppPort)
 	if err := router.Run(":" + cfg.AppPort); err != nil {
 		log.Fatalf("server gagal jalan: %v", err)
+	}
+}
+
+// runReminderScheduler menjalankan ReminderService.CheckAndNotify secara
+// periodik. Cek pertama terjadi SEGERA saat startup (bukan menunggu satu
+// interval dulu) - reminder yang jadwalnya sudah due tidak perlu menunggu
+// sampai tick pertama lewat, dan ini juga yang membuat fitur ini gampang
+// diverifikasi manual (restart server = cek langsung jalan).
+//
+// Interval 1 jam dipilih karena ExistsSentToday sudah menjamin maksimal
+// satu email per job per jenis reminder per hari - jadi presisi ke menit
+// tidak dibutuhkan, cukup "dalam sejam sejak due boleh sedikit telat".
+// time.Ticker standar dipakai, bukan library cron (mis. robfig/cron) -
+// cukup untuk kebutuhan project ini, tidak butuh jadwal presisi/multi-job
+// yang jadi alasan utama pakai library cron sungguhan.
+func runReminderScheduler(svc *job.ReminderService) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for {
+		if err := svc.CheckAndNotify(context.Background()); err != nil {
+			log.Printf("reminder check gagal: %v", err)
+		}
+		<-ticker.C
 	}
 }

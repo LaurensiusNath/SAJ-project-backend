@@ -36,6 +36,8 @@ Isi `JWT_SECRET` di `.env` (wajib, server menolak start kalau kosong):
 openssl rand -hex 32
 ```
 
+Isi `SMTP_HOST`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM` di `.env` kalau mau notifikasi email benar-benar terkirim (opsional - kosong tetap boleh, server tetap jalan, cuma kirim emailnya yang gagal). Contoh Gmail: `SMTP_HOST=smtp.gmail.com`, `SMTP_USER`=alamat gmail, `SMTP_PASS`=App Password dari myaccount.google.com/apppasswords (bukan password akun biasa).
+
 ### 3. Jalankan migration
 ```bash
 migrate -path db/migrations -database "postgres://cncuser:cncpassword@localhost:5432/cnc_pm_db?sslmode=disable" up
