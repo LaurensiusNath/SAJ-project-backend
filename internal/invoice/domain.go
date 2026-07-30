@@ -11,9 +11,9 @@ import (
 type Status string
 
 const (
-	StatusDraft     Status = "draft"
-	StatusSent      Status = "sent"
-	StatusPaid      Status = "paid"
+	StatusDraft Status = "draft"
+	StatusSent  Status = "sent"
+	StatusPaid  Status = "paid"
 	// StatusOverdue biasanya diset OTOMATIS oleh Service.MarkOverdue
 	// (dipanggil dari ticker reminder yang sama dengan job.ReminderService,
 	// lihat cmd/api/main.go/runReminderScheduler), tapi tetap termasuk
