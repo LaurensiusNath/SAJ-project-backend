@@ -7,6 +7,15 @@ import (
 	"github.com/google/uuid"
 )
 
+// Sender adalah interface kecil yang dipakai modul LAIN (job.Service, dst)
+// untuk bergantung ke notification tanpa perlu tahu konstruksi *Service
+// yang sebenarnya (Repository + Mailer) - sama pola dengan Repository di
+// modul lain, supaya caller-nya bisa diuji pakai fake yang cuma
+// mengimplementasikan method ini.
+type Sender interface {
+	SendEmail(ctx context.Context, in EmailInput) error
+}
+
 type Service struct {
 	repo   Repository
 	mailer Mailer
