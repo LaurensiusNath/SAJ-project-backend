@@ -119,6 +119,19 @@ func (f *fakeRepository) ListPayments(_ context.Context, invoiceID uuid.UUID) ([
 	return f.payments[invoiceID], nil
 }
 
+func (f *fakeRepository) MarkOverdue(_ context.Context) ([]Invoice, error) {
+	var overdue []Invoice
+	for id, inv := range f.invoices {
+		if inv.Status != StatusSent || inv.DueDate == nil || !inv.DueDate.Before(time.Now()) {
+			continue
+		}
+		inv.Status = StatusOverdue
+		f.invoices[id] = inv
+		overdue = append(overdue, inv)
+	}
+	return overdue, nil
+}
+
 func TestService_CreateFromJob(t *testing.T) {
 	negative := decimal.NewFromInt(-1)
 	valid := decimal.NewFromInt(11)
@@ -226,4 +239,55 @@ func TestService_RecordPayment(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+// TestService_MarkOverdue proves the classification rule from
+// docs/api-contract.md: only 'sent' invoices whose due_date is in the past
+// flip to 'overdue' - 'paid'/'draft'/'cancelled' invoices, and 'sent'
+// invoices whose due_date is still in the future (or unset), must be left
+// untouched.
+func TestService_MarkOverdue(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	ctx := context.Background()
+	yesterday := time.Now().AddDate(0, 0, -1)
+	tomorrow := time.Now().AddDate(0, 0, 1)
+
+	overdueSent, err := svc.CreateFromJob(ctx, uuid.New(), CreateInput{DueDate: &yesterday})
+	require.NoError(t, err)
+	repo.invoices[overdueSent.ID] = setStatus(repo.invoices[overdueSent.ID], StatusSent)
+
+	notYetDueSent, err := svc.CreateFromJob(ctx, uuid.New(), CreateInput{DueDate: &tomorrow})
+	require.NoError(t, err)
+	repo.invoices[notYetDueSent.ID] = setStatus(repo.invoices[notYetDueSent.ID], StatusSent)
+
+	alreadyPaid, err := svc.CreateFromJob(ctx, uuid.New(), CreateInput{DueDate: &yesterday})
+	require.NoError(t, err)
+	repo.invoices[alreadyPaid.ID] = setStatus(repo.invoices[alreadyPaid.ID], StatusPaid)
+
+	stillDraft, err := svc.CreateFromJob(ctx, uuid.New(), CreateInput{DueDate: &yesterday})
+	require.NoError(t, err)
+	// stillDraft stays StatusDraft (CreateFromJob's default) - overdue past
+	// due_date but never sent, must not be touched either.
+
+	overdue, err := svc.MarkOverdue(ctx)
+
+	require.NoError(t, err)
+	require.Len(t, overdue, 1, "only the overdue+sent invoice should transition")
+	assert.Equal(t, overdueSent.ID, overdue[0].ID)
+
+	assertStatus(t, repo, overdueSent.ID, StatusOverdue)
+	assertStatus(t, repo, notYetDueSent.ID, StatusSent)
+	assertStatus(t, repo, alreadyPaid.ID, StatusPaid)
+	assertStatus(t, repo, stillDraft.ID, StatusDraft)
+}
+
+func setStatus(inv Invoice, status Status) Invoice {
+	inv.Status = status
+	return inv
+}
+
+func assertStatus(t *testing.T, repo *fakeRepository, id uuid.UUID, want Status) {
+	t.Helper()
+	assert.Equal(t, want, repo.invoices[id].Status)
 }
