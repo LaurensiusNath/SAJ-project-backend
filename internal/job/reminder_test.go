@@ -64,6 +64,28 @@ func TestReminderContent_Classification(t *testing.T) {
 	}
 }
 
+// TestReminderContent_CrossTimezone_MatchesGmailWIBScenario adalah
+// regression test untuk bug nyata yang ditemukan saat verifikasi manual:
+// scheduled_date tersimpan sebagai UTC tengah malam, tapi "today" biasanya
+// datang dari time.Now() di zona waktu lokal proses (mis. WIB, UTC+7) -
+// tanpa disamakan ke satu zona (lihat truncateToDate), job yang jadwalnya
+// besok tidak pernah terklasifikasi "besok" karena instant "besok versi
+// UTC" dan "besok versi +07" berbeda.
+func TestReminderContent_CrossTimezone_MatchesGmailWIBScenario(t *testing.T) {
+	wib := time.FixedZone("WIB", 7*60*60)
+	// "today" jam 9 pagi WIB - representatif untuk proses yang jalan di
+	// server dengan zona waktu lokal +07 (bukan UTC).
+	today := time.Date(2026, 7, 30, 9, 0, 0, 0, wib)
+	// scheduled_date besok, tersimpan sebagai UTC tengah malam - persis
+	// seperti hasil parseOptionalDate/pgconv.ToDate untuk input "2026-07-31".
+	tomorrowUTC := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	j := Job{JobCode: "JOB-2026-0007", Title: "Servis Besok Test", ScheduledDate: &tomorrowUTC}
+
+	subject, _ := reminderContent(j, today)
+
+	assert.Equal(t, "Pengingat: Jadwal Servis Anda Besok", subject)
+}
+
 func ptrDate(y int, m time.Month, d int) *time.Time {
 	t := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 	return &t

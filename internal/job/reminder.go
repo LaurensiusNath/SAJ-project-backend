@@ -99,7 +99,25 @@ func reminderContent(j Job, today time.Time) (subject, body string) {
 	}
 }
 
+// businessTimezone = WIB (UTC+7, tidak ada DST) - dipakai FixedZone, bukan
+// time.LoadLocation("Asia/Jakarta"), supaya tidak bergantung ke IANA tzdata
+// yang belum tentu ter-install di image Docker (Alpine base minimal sering
+// tidak menyertakannya kecuali paket tzdata ditambahkan eksplisit).
+var businessTimezone = time.FixedZone("WIB", 7*60*60)
+
+// truncateToDate mengambil tanggal kalender (Y-M-D) dalam zona waktu bisnis
+// (WIB), BUKAN zona waktu lokal proses Go maupun UTC mentah - ini penting:
+// scheduled_date datang dari kolom DATE Postgres sebagai UTC tengah malam
+// (mis. "2026-07-31" tersimpan sebagai 2026-07-31T00:00:00Z), sedangkan
+// "today" dari time.Now() memakai zona waktu lokal server (bisa apa saja,
+// tergantung OS/deployment). Membandingkan keduanya tanpa menyamakan zona
+// dulu menghasilkan bug nyata yang ketemu saat verifikasi manual: job
+// dengan scheduled_date besok tidak terklasifikasi "besok" sama sekali,
+// karena "besok" versi UTC dan "besok" versi lokal +07 jatuh di instant
+// yang beda. Menyamakan keduanya ke WIB (dipilih karena bisnis ini
+// bengkel tunggal di Indonesia) membuat perbandingan tanggal kalender
+// benar terlepas dari timezone proses Go yang menjalankannya.
 func truncateToDate(t time.Time) time.Time {
-	y, m, d := t.Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
+	y, m, d := t.In(businessTimezone).Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, businessTimezone)
 }
