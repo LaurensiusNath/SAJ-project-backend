@@ -15,17 +15,21 @@ import (
 
 // Service butuh customer.Repository dan user.Repository selain notifier -
 // AssignTechnician/UpdateStatus perlu tahu email customer/teknisi untuk
-// mengirim notifikasi. Sama pola dependency-nya dengan CostService yang
-// bergantung ke job.Repository, cuma di sini menyeberang ke modul lain.
+// mengirim notifikasi. costRepo ditambahkan untuk GetDetail (menyusun
+// field `costs` di GET /jobs/{id} tanpa client harus panggil
+// GET /jobs/{id}/costs terpisah). Sama pola dependency-nya dengan
+// CostService yang bergantung ke job.Repository, cuma di sini menyeberang
+// ke modul lain (dan, untuk costRepo, ke tipe lain di package yang sama).
 type Service struct {
 	repo         Repository
 	customerRepo customer.Repository
 	userRepo     user.Repository
+	costRepo     CostRepository
 	notifier     notification.Sender
 }
 
-func NewService(repo Repository, customerRepo customer.Repository, userRepo user.Repository, notifier notification.Sender) *Service {
-	return &Service{repo: repo, customerRepo: customerRepo, userRepo: userRepo, notifier: notifier}
+func NewService(repo Repository, customerRepo customer.Repository, userRepo user.Repository, costRepo CostRepository, notifier notification.Sender) *Service {
+	return &Service{repo: repo, customerRepo: customerRepo, userRepo: userRepo, costRepo: costRepo, notifier: notifier}
 }
 
 // CreateInput sengaja tidak punya Status/JobCode - job baru selalu mulai
@@ -60,6 +64,30 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Job, error) {
 
 func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (Job, error) {
 	return s.repo.GetByID(ctx, id)
+}
+
+// GetDetail dipakai HANYA oleh GET /jobs/{id} (lihat docs/api-contract.md:
+// "wajib nested, ini requirement, bukan opsional") - menyusun Job + riwayat
+// status + daftar biaya dalam satu response, supaya frontend tidak perlu
+// 3x round-trip (GetByID, lalu ListStatusHistory, lalu costRepo.ListByJob
+// terpisah).
+func (s *Service) GetDetail(ctx context.Context, id uuid.UUID) (Detail, error) {
+	j, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return Detail{}, err
+	}
+
+	history, err := s.repo.ListStatusHistory(ctx, id)
+	if err != nil {
+		return Detail{}, fmt.Errorf("list job status history: %w", err)
+	}
+
+	costs, err := s.costRepo.ListByJob(ctx, id)
+	if err != nil {
+		return Detail{}, fmt.Errorf("list job costs: %w", err)
+	}
+
+	return Detail{Job: j, StatusHistory: history, Costs: costs}, nil
 }
 
 type ListParams struct {
@@ -108,7 +136,12 @@ func (s *Service) List(ctx context.Context, p ListParams) (ListResult, error) {
 // historis "pernah completed kapan". Tidak ada validasi urutan transisi
 // (mis. requested -> completed langsung diperbolehkan) - state machine
 // yang lebih ketat bisa ditambah nanti kalau memang dibutuhkan bisnisnya.
-func (s *Service) UpdateStatus(ctx context.Context, id uuid.UUID, status JobStatus) (Job, error) {
+//
+// changedBy WAJIB diisi (bukan pointer/opsional) - ini identitas user yang
+// login, dibaca handler.go dari JWT claim (auth.UserIDFromContext), bukan
+// dari body request client (tidak bisa dipalsukan client jadi "atas nama"
+// user lain).
+func (s *Service) UpdateStatus(ctx context.Context, id uuid.UUID, status JobStatus, changedBy uuid.UUID, notes *string) (Job, error) {
 	if !status.Valid() {
 		return Job{}, ErrInvalidStatus
 	}
@@ -119,7 +152,7 @@ func (s *Service) UpdateStatus(ctx context.Context, id uuid.UUID, status JobStat
 		completedDate = &now
 	}
 
-	updated, err := s.repo.UpdateStatus(ctx, id, status, completedDate)
+	updated, err := s.repo.UpdateStatus(ctx, id, status, completedDate, changedBy, notes)
 	if err != nil {
 		return Job{}, fmt.Errorf("update job status: %w", err)
 	}

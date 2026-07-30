@@ -75,3 +75,28 @@ func (j Job) Validate() error {
 	}
 	return nil
 }
+
+// JobStatusHistory adalah satu baris audit trail perubahan status - selalu
+// ditulis bersamaan (dalam satu transaksi) dengan UPDATE jobs.status oleh
+// repository.go, tidak pernah ditulis manual dari tempat lain. ChangedBy
+// selalu terisi (bukan pointer) karena satu-satunya jalur penulisan
+// (PATCH /jobs/{id}/status) selalu melewati RequireAuth.
+type JobStatusHistory struct {
+	ID        uuid.UUID `json:"id"`
+	JobID     uuid.UUID `json:"job_id"`
+	Status    JobStatus `json:"status"`
+	ChangedBy uuid.UUID `json:"changed_by"`
+	ChangedAt time.Time `json:"changed_at"`
+	Notes     *string   `json:"notes"`
+}
+
+// Detail membungkus Job + status_history + costs, sesuai
+// docs/api-contract.md ("GET /jobs/{id} wajib nested") - dipakai HANYA
+// oleh Handler.GetByID, bukan endpoint lain (List/Create/dst tetap
+// mengembalikan Job polos, sama seperti customer.customerDetailResponse
+// yang cuma dipakai di GetByID).
+type Detail struct {
+	Job
+	StatusHistory []JobStatusHistory `json:"status_history"`
+	Costs         []JobCost          `json:"costs"`
+}

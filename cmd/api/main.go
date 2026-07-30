@@ -99,8 +99,16 @@ func main() {
 	machineHandler := customer.NewMachineHandler(machineService)
 	machineHandler.RegisterRoutes(protectedGroup)
 
-	jobRepo := job.NewRepository(queries)
-	jobService := job.NewService(jobRepo, customerRepo, userRepo, notifier)
+	// jobCostRepo dibuat lebih dulu - jobService butuh CostRepository juga
+	// sekarang (buat menyusun field `costs` di GET /jobs/{id}, lihat
+	// job.Service.GetDetail).
+	jobCostRepo := job.NewCostRepository(queries)
+
+	// job.NewRepository butuh dbPool juga sekarang (sebelumnya cukup
+	// Queries) - UpdateStatus membungkus UPDATE jobs + INSERT
+	// job_status_history dalam satu transaksi (lihat internal/job/repository.go).
+	jobRepo := job.NewRepository(dbPool, queries)
+	jobService := job.NewService(jobRepo, customerRepo, userRepo, jobCostRepo, notifier)
 	jobHandler := job.NewHandler(jobService)
 	jobHandler.RegisterRoutes(protectedGroup)
 
@@ -110,7 +118,6 @@ func main() {
 	reminderService := job.NewReminderService(jobRepo, customerRepo, notifier, notificationRepo)
 	go runReminderScheduler(reminderService)
 
-	jobCostRepo := job.NewCostRepository(queries)
 	jobCostService := job.NewCostService(jobCostRepo, jobRepo)
 	jobCostHandler := job.NewCostHandler(jobCostService)
 	jobCostHandler.RegisterRoutes(protectedGroup)
