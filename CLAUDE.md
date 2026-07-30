@@ -37,7 +37,9 @@ dan dashboard visualisasi.
 
 ## Tech Stack (Backend)
 
-- Go 1.22, framework HTTP: **Gin**
+- Go 1.25 (naik dari 1.22 setelah testcontainers-go ditambahkan untuk
+  integration test - dependency graph-nya mewajibkan Go >= 1.25, lihat
+  commit terkait), framework HTTP: **Gin**
 - Database access: **sqlc** (raw SQL, type-safe) — sengaja dipilih daripada ORM
   penuh (GORM) supaya query optimization terasa langsung
 - PostgreSQL (data utama) + Redis (cache, queue, session)

@@ -1,14 +1,19 @@
 # sqlc diambil dari image resminya (binary sudah dikompilasi), BUKAN lewat
-# `go install` di image golang:1.22-alpine - sqlc v1.31.1 sendiri butuh
-# Go >= 1.26 untuk DIKOMPILASI, padahal kita cuma butuh MENJALANKANNYA.
-# Memaksa `go install` di golang:1.22-alpine gagal (dicoba dulu, terbukti
-# error "requires go >= 1.26.0"). Mengambil binary jadi dari image resmi
-# menghindari isu ini sepenuhnya - versi Go yang mengompilasi sqlc tidak
-# perlu sama dengan versi Go yang mengompilasi aplikasi kita sendiri.
+# `go install` - sqlc v1.31.1 sendiri butuh Go >= 1.26 untuk DIKOMPILASI,
+# padahal kita cuma butuh MENJALANKANNYA. Mengambil binary jadi dari image
+# resmi menghindari isu ini sepenuhnya - versi Go yang mengompilasi sqlc
+# tidak perlu sama dengan versi Go yang mengompilasi aplikasi kita sendiri.
 FROM sqlc/sqlc:1.31.1 AS sqlc
 
 # ---- build stage ----
-FROM golang:1.22-alpine AS builder
+# go.mod naik dari 1.22 ke 1.25 (lihat commit yang menambahkan
+# testcontainers-go untuk integration test) - dependency graph
+# testcontainers-go (Docker client SDK, OpenTelemetry, gRPC) mewajibkan
+# Go >= 1.25 di level TRANSITIF, terlepas dari versi testcontainers-go
+# yang dipilih (sudah dicoba beberapa versi lebih lama, floor-nya tetap
+# sama). Base image builder ini WAJIB ikut naik supaya konsisten dengan
+# go.mod - Go toolchain yang mengompilasi harus >= yang dinyatakan go.mod.
+FROM golang:1.25-alpine AS builder
 WORKDIR /app
 COPY --from=sqlc /workspace/sqlc /usr/local/bin/sqlc
 
