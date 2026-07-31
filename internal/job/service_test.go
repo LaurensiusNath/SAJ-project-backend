@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -54,8 +55,26 @@ type noopNotifier struct{}
 
 func (noopNotifier) SendEmail(context.Context, notification.EmailInput) error { return nil }
 
+// noopCostRepo: job.Service.GetDetail butuh CostRepository - test di file
+// ini tidak menguji perilaku job_costs (itu tanggung jawab
+// cost_service_test.go sendiri), jadi fake ini selalu mengembalikan slice
+// kosong.
+type noopCostRepo struct{}
+
+func (noopCostRepo) Create(context.Context, JobCost) (JobCost, error) { return JobCost{}, nil }
+func (noopCostRepo) ListByJob(context.Context, uuid.UUID) ([]JobCost, error) {
+	return nil, nil
+}
+func (noopCostRepo) Totals(context.Context, uuid.UUID) (CostTotals, error) {
+	return CostTotals{}, nil
+}
+func (noopCostRepo) Delete(context.Context, uuid.UUID, uuid.UUID) error { return nil }
+func (noopCostRepo) InvoiceTotals(context.Context, uuid.UUID) (InvoiceCostTotals, error) {
+	return InvoiceCostTotals{}, nil
+}
+
 func newTestService(repo Repository) *Service {
-	return NewService(repo, noopCustomerRepo{}, noopUserRepo{}, noopNotifier{})
+	return NewService(repo, noopCustomerRepo{}, noopUserRepo{}, noopCostRepo{}, noopNotifier{})
 }
 
 // stubCustomerRepo/stubUserRepo/recordingNotifier - dipakai KHUSUS test
@@ -91,12 +110,16 @@ func (r *recordingNotifier) SendEmail(_ context.Context, in notification.EmailIn
 // fakeRepository - in-memory, tulisan tangan, sama pola dengan
 // internal/customer/service_test.go.
 type fakeRepository struct {
-	jobs map[uuid.UUID]Job
-	tick int
+	jobs          map[uuid.UUID]Job
+	statusHistory map[uuid.UUID][]JobStatusHistory
+	tick          int
 }
 
 func newFakeRepository() *fakeRepository {
-	return &fakeRepository{jobs: make(map[uuid.UUID]Job)}
+	return &fakeRepository{
+		jobs:          make(map[uuid.UUID]Job),
+		statusHistory: make(map[uuid.UUID][]JobStatusHistory),
+	}
 }
 
 // nextTimestamp menghindari time.Now() dipanggil dua kali super cepat
@@ -168,7 +191,7 @@ func (f *fakeRepository) ListNeedingReminderCheck(_ context.Context) ([]Job, err
 	return result, nil
 }
 
-func (f *fakeRepository) UpdateStatus(_ context.Context, id uuid.UUID, status JobStatus, completedDate *time.Time) (Job, error) {
+func (f *fakeRepository) UpdateStatus(_ context.Context, id uuid.UUID, status JobStatus, completedDate *time.Time, changedBy uuid.UUID, notes *string) (Job, error) {
 	j, ok := f.jobs[id]
 	if !ok {
 		return Job{}, ErrNotFound
@@ -176,7 +199,19 @@ func (f *fakeRepository) UpdateStatus(_ context.Context, id uuid.UUID, status Jo
 	j.Status = status
 	j.CompletedDate = completedDate
 	f.jobs[id] = j
+	f.statusHistory[id] = append(f.statusHistory[id], JobStatusHistory{
+		ID:        uuid.New(),
+		JobID:     id,
+		Status:    status,
+		ChangedBy: changedBy,
+		ChangedAt: f.nextTimestamp(),
+		Notes:     notes,
+	})
 	return j, nil
+}
+
+func (f *fakeRepository) ListStatusHistory(_ context.Context, jobID uuid.UUID) ([]JobStatusHistory, error) {
+	return f.statusHistory[jobID], nil
 }
 
 func (f *fakeRepository) AssignTechnician(_ context.Context, id, technicianID uuid.UUID, expectedUpdatedAt time.Time) (Job, error) {
@@ -254,7 +289,7 @@ func TestService_List_FiltersByStatusAndCounts(t *testing.T) {
 	}
 	completed, err := svc.Create(ctx, CreateInput{CustomerID: customerID, Title: "Job completed"})
 	require.NoError(t, err)
-	_, err = svc.UpdateStatus(ctx, completed.ID, StatusCompleted)
+	_, err = svc.UpdateStatus(ctx, completed.ID, StatusCompleted, uuid.New(), nil)
 	require.NoError(t, err)
 
 	requested := StatusRequested
@@ -272,11 +307,11 @@ func TestService_UpdateStatus_SetsAndClearsCompletedDate(t *testing.T) {
 	created, err := svc.Create(ctx, CreateInput{CustomerID: uuid.New(), Title: "Servis"})
 	require.NoError(t, err)
 
-	completed, err := svc.UpdateStatus(ctx, created.ID, StatusCompleted)
+	completed, err := svc.UpdateStatus(ctx, created.ID, StatusCompleted, uuid.New(), nil)
 	require.NoError(t, err)
 	require.NotNil(t, completed.CompletedDate, "completed_date should be set once status becomes completed")
 
-	reopened, err := svc.UpdateStatus(ctx, created.ID, StatusInProgress)
+	reopened, err := svc.UpdateStatus(ctx, created.ID, StatusInProgress, uuid.New(), nil)
 	require.NoError(t, err)
 	assert.Nil(t, reopened.CompletedDate, "completed_date should be cleared if job is reopened")
 }
@@ -284,7 +319,7 @@ func TestService_UpdateStatus_SetsAndClearsCompletedDate(t *testing.T) {
 func TestService_UpdateStatus_RejectsInvalidStatus(t *testing.T) {
 	svc := newTestService(newFakeRepository())
 
-	_, err := svc.UpdateStatus(context.Background(), uuid.New(), JobStatus("bukan-status-valid"))
+	_, err := svc.UpdateStatus(context.Background(), uuid.New(), JobStatus("bukan-status-valid"), uuid.New(), nil)
 
 	require.ErrorIs(t, err, ErrInvalidStatus)
 }
@@ -292,7 +327,7 @@ func TestService_UpdateStatus_RejectsInvalidStatus(t *testing.T) {
 func TestService_UpdateStatus_NotFound(t *testing.T) {
 	svc := newTestService(newFakeRepository())
 
-	_, err := svc.UpdateStatus(context.Background(), uuid.New(), StatusScheduled)
+	_, err := svc.UpdateStatus(context.Background(), uuid.New(), StatusScheduled, uuid.New(), nil)
 
 	require.ErrorIs(t, err, ErrNotFound)
 }
@@ -351,6 +386,7 @@ func TestService_AssignTechnician_NotifiesCustomerAndTechnician(t *testing.T) {
 		repo,
 		stubCustomerRepo{customer: customer.Customer{Email: &custEmail}},
 		stubUserRepo{user: user.User{Email: techEmail}},
+		noopCostRepo{},
 		notifier,
 	)
 	created, err := svc.Create(context.Background(), CreateInput{CustomerID: uuid.New(), Title: "Servis"})
@@ -372,17 +408,102 @@ func TestService_UpdateStatus_Completed_NotifiesCustomer(t *testing.T) {
 	repo := newFakeRepository()
 	custEmail := "customer@example.com"
 	notifier := &recordingNotifier{}
-	svc := NewService(repo, stubCustomerRepo{customer: customer.Customer{Email: &custEmail}}, noopUserRepo{}, notifier)
+	svc := NewService(repo, stubCustomerRepo{customer: customer.Customer{Email: &custEmail}}, noopUserRepo{}, noopCostRepo{}, notifier)
 	created, err := svc.Create(context.Background(), CreateInput{CustomerID: uuid.New(), Title: "Servis"})
 	require.NoError(t, err)
 
-	_, err = svc.UpdateStatus(context.Background(), created.ID, StatusInProgress)
+	_, err = svc.UpdateStatus(context.Background(), created.ID, StatusInProgress, uuid.New(), nil)
 	require.NoError(t, err)
 	assert.Empty(t, notifier.sent, "in_progress should not trigger any notification")
 
-	_, err = svc.UpdateStatus(context.Background(), created.ID, StatusCompleted)
+	_, err = svc.UpdateStatus(context.Background(), created.ID, StatusCompleted, uuid.New(), nil)
 
 	require.NoError(t, err)
 	require.Len(t, notifier.sent, 1)
 	assert.Equal(t, custEmail, notifier.sent[0].To)
+}
+
+// TestService_UpdateStatus_RecordsHistory membuktikan requirement dari
+// docs/api-contract.md: "Setiap perubahan wajib insert row baru ke
+// job_status_history" (status, changed_by dari JWT claim, notes).
+func TestService_UpdateStatus_RecordsHistory(t *testing.T) {
+	repo := newFakeRepository()
+	svc := newTestService(repo)
+	created, err := svc.Create(context.Background(), CreateInput{CustomerID: uuid.New(), Title: "Servis"})
+	require.NoError(t, err)
+	changedBy := uuid.New()
+	notes := "Teknisi sudah di lokasi"
+
+	_, err = svc.UpdateStatus(context.Background(), created.ID, StatusInProgress, changedBy, &notes)
+
+	require.NoError(t, err)
+	history, err := repo.ListStatusHistory(context.Background(), created.ID)
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	assert.Equal(t, StatusInProgress, history[0].Status)
+	assert.Equal(t, changedBy, history[0].ChangedBy)
+	require.NotNil(t, history[0].Notes)
+	assert.Equal(t, notes, *history[0].Notes)
+}
+
+// TestService_UpdateStatus_RecordsHistory_MultipleTransitions membuktikan
+// riwayat terakumulasi (bukan menimpa) tiap kali status berubah lagi, urut
+// kronologis - GET /jobs/{id} butuh urutan ini apa adanya (lihat GetDetail).
+func TestService_UpdateStatus_RecordsHistory_MultipleTransitions(t *testing.T) {
+	repo := newFakeRepository()
+	svc := newTestService(repo)
+	created, err := svc.Create(context.Background(), CreateInput{CustomerID: uuid.New(), Title: "Servis"})
+	require.NoError(t, err)
+
+	_, err = svc.UpdateStatus(context.Background(), created.ID, StatusScheduled, uuid.New(), nil)
+	require.NoError(t, err)
+	_, err = svc.UpdateStatus(context.Background(), created.ID, StatusInProgress, uuid.New(), nil)
+	require.NoError(t, err)
+	_, err = svc.UpdateStatus(context.Background(), created.ID, StatusCompleted, uuid.New(), nil)
+	require.NoError(t, err)
+
+	history, err := repo.ListStatusHistory(context.Background(), created.ID)
+
+	require.NoError(t, err)
+	require.Len(t, history, 3)
+	assert.Equal(t, StatusScheduled, history[0].Status)
+	assert.Equal(t, StatusInProgress, history[1].Status)
+	assert.Equal(t, StatusCompleted, history[2].Status)
+}
+
+// TestService_GetDetail_ComposesJobHistoryAndCosts membuktikan GET /jobs/{id}
+// mengembalikan Job + status_history + costs dalam satu response (lihat
+// docs/api-contract.md: "wajib nested, ini requirement, bukan opsional").
+func TestService_GetDetail_ComposesJobHistoryAndCosts(t *testing.T) {
+	jobRepo := newFakeRepository()
+	costRepo := newFakeCostRepository()
+	svc := NewService(jobRepo, noopCustomerRepo{}, noopUserRepo{}, costRepo, noopNotifier{})
+	created, err := svc.Create(context.Background(), CreateInput{CustomerID: uuid.New(), Title: "Servis"})
+	require.NoError(t, err)
+
+	changedBy := uuid.New()
+	_, err = svc.UpdateStatus(context.Background(), created.ID, StatusInProgress, changedBy, nil)
+	require.NoError(t, err)
+
+	_, err = costRepo.Create(context.Background(), JobCost{
+		JobID: created.ID, CostType: CostTypeLabor, Description: "Jasa",
+		Quantity: decimal.NewFromInt(1), SellingPrice: decimal.NewFromInt(1),
+	})
+	require.NoError(t, err)
+
+	detail, err := svc.GetDetail(context.Background(), created.ID)
+
+	require.NoError(t, err)
+	assert.Equal(t, created.ID, detail.ID, "Detail embeds Job fields directly")
+	require.Len(t, detail.StatusHistory, 1)
+	assert.Equal(t, StatusInProgress, detail.StatusHistory[0].Status)
+	require.Len(t, detail.Costs, 1)
+}
+
+func TestService_GetDetail_NotFound(t *testing.T) {
+	svc := newTestService(newFakeRepository())
+
+	_, err := svc.GetDetail(context.Background(), uuid.New())
+
+	require.ErrorIs(t, err, ErrNotFound)
 }

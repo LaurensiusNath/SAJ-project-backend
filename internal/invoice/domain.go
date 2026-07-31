@@ -11,15 +11,22 @@ import (
 type Status string
 
 const (
-	StatusDraft     Status = "draft"
-	StatusSent      Status = "sent"
-	StatusPaid      Status = "paid"
+	StatusDraft Status = "draft"
+	StatusSent  Status = "sent"
+	StatusPaid  Status = "paid"
+	// StatusOverdue biasanya diset OTOMATIS oleh Service.MarkOverdue
+	// (dipanggil dari ticker reminder yang sama dengan job.ReminderService,
+	// lihat cmd/api/main.go/runReminderScheduler), tapi tetap termasuk
+	// nilai valid untuk PATCH /invoices/{id}/status manual juga (sesuai
+	// api-contract.md) - mis. admin ingin memperbaiki status yang belum
+	// sempat ke-set otomatis oleh ticker.
+	StatusOverdue   Status = "overdue"
 	StatusCancelled Status = "cancelled"
 )
 
 func (s Status) Valid() bool {
 	switch s {
-	case StatusDraft, StatusSent, StatusPaid, StatusCancelled:
+	case StatusDraft, StatusSent, StatusPaid, StatusOverdue, StatusCancelled:
 		return true
 	default:
 		return false

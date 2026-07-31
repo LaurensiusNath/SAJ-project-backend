@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/nathan/cnc-pm-backend/internal/auth"
 	"github.com/nathan/cnc-pm-backend/internal/httpresponse"
 )
 
@@ -65,6 +66,9 @@ func (h *Handler) Create(c *gin.Context) {
 	httpresponse.Success(c, http.StatusCreated, created)
 }
 
+// GetByID mengembalikan Job + status_history + costs (lihat
+// docs/api-contract.md: "wajib nested, ini requirement, bukan opsional") -
+// beda dari List yang tetap mengembalikan Job polos.
 func (h *Handler) GetByID(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -72,7 +76,7 @@ func (h *Handler) GetByID(c *gin.Context) {
 		return
 	}
 
-	found, err := h.svc.GetByID(c.Request.Context(), id)
+	found, err := h.svc.GetDetail(c.Request.Context(), id)
 	if err != nil {
 		h.respondError(c, err)
 		return
@@ -117,7 +121,8 @@ func (h *Handler) List(c *gin.Context) {
 }
 
 type updateStatusRequest struct {
-	Status string `json:"status" binding:"required,oneof=requested scheduled in_progress completed cancelled"`
+	Status string  `json:"status" binding:"required,oneof=requested scheduled in_progress completed cancelled"`
+	Notes  *string `json:"notes"`
 }
 
 func (h *Handler) UpdateStatus(c *gin.Context) {
@@ -133,7 +138,17 @@ func (h *Handler) UpdateStatus(c *gin.Context) {
 		return
 	}
 
-	updated, err := h.svc.UpdateStatus(c.Request.Context(), id, JobStatus(req.Status))
+	// changedBy WAJIB dari JWT claim (siapa yang login), bukan dari body -
+	// route ini selalu di belakang RequireAuth (lihat main.go), jadi selalu
+	// ada; kalaupun tidak ada (harusnya mustahil), lebih aman gagal 401
+	// daripada diam-diam catat UUID kosong sebagai "siapa yang mengubah".
+	changedBy, ok := auth.UserIDFromContext(c)
+	if !ok {
+		httpresponse.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "missing authentication")
+		return
+	}
+
+	updated, err := h.svc.UpdateStatus(c.Request.Context(), id, JobStatus(req.Status), changedBy, req.Notes)
 	if err != nil {
 		h.respondError(c, err)
 		return

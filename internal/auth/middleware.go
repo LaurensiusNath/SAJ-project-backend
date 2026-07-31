@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 
 	"github.com/nathan/cnc-pm-backend/internal/httpresponse"
 	"github.com/nathan/cnc-pm-backend/internal/user"
@@ -82,4 +83,25 @@ func RequireRole(roles ...user.Role) gin.HandlerFunc {
 		httpresponse.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient permissions for this action")
 		c.Abort()
 	}
+}
+
+// UserIDFromContext membaca user_id yang sudah divalidasi RequireAuth dari
+// gin.Context - dipakai modul bisnis (mis. job.Handler) yang perlu tahu
+// SIAPA yang melakukan sebuah aksi (mis. job_status_history.changed_by),
+// bukan cuma "apakah request ini terautentikasi".
+//
+// Ini BUKAN pelanggaran terhadap prinsip "modul bisnis tidak boleh
+// bergantung ke internal/auth" yang dipegang di settings/user - itu
+// prinsip untuk menghindari modul bisnis MENEGAKKAN kebijakan otorisasi
+// sendiri (duplikasi RequireRole). Fungsi ini cuma MEMBACA data yang sudah
+// divalidasi & ditaruh middleware yang sudah dipasang di router - sama
+// sifatnya dengan membaca header request biasa, bukan keputusan
+// otorisasi baru.
+func UserIDFromContext(c *gin.Context) (uuid.UUID, bool) {
+	value, ok := c.Get(contextKeyUserID)
+	if !ok {
+		return uuid.UUID{}, false
+	}
+	id, ok := value.(uuid.UUID)
+	return id, ok
 }

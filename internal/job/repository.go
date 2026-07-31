@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nathan/cnc-pm-backend/internal/pgconv"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
@@ -42,7 +43,14 @@ type Repository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (Job, error)
 	List(ctx context.Context, filter ListFilter, limit, offset int32) ([]Job, error)
 	Count(ctx context.Context, filter ListFilter) (int64, error)
-	UpdateStatus(ctx context.Context, id uuid.UUID, status JobStatus, completedDate *time.Time) (Job, error)
+	// UpdateStatus menulis UPDATE jobs.status DAN INSERT job_status_history
+	// dalam SATU transaksi (lihat badan fungsi) - changedBy datang dari JWT
+	// claim user yang login (dibaca handler.go lewat auth.UserIDFromContext),
+	// bukan dari body request.
+	UpdateStatus(ctx context.Context, id uuid.UUID, status JobStatus, completedDate *time.Time, changedBy uuid.UUID, notes *string) (Job, error)
+	// ListStatusHistory dipakai Service.GetDetail untuk menyusun field
+	// status_history di response GET /jobs/{id}.
+	ListStatusHistory(ctx context.Context, jobID uuid.UUID) ([]JobStatusHistory, error)
 	// AssignTechnician pakai optimistic locking: expectedUpdatedAt harus
 	// persis sama dengan jobs.updated_at saat ini, kalau tidak (sudah diubah
 	// pihak lain) mengembalikan ErrConflict. Lihat penjelasan lengkap di
@@ -54,11 +62,16 @@ type Repository interface {
 }
 
 type sqlcRepository struct {
-	q *sqlcgen.Queries
+	pool *pgxpool.Pool
+	q    *sqlcgen.Queries
 }
 
-func NewRepository(q *sqlcgen.Queries) Repository {
-	return &sqlcRepository{q: q}
+// NewRepository sekarang butuh *pgxpool.Pool juga (sebelumnya cukup
+// Queries) - UpdateStatus perlu membuka transaksi sendiri supaya UPDATE
+// jobs.status dan INSERT job_status_history konsisten (lihat badan fungsi
+// UpdateStatus). Pola yang sama seperti invoice.NewRepository.
+func NewRepository(pool *pgxpool.Pool, q *sqlcgen.Queries) Repository {
+	return &sqlcRepository{pool: pool, q: q}
 }
 
 // Create men-generate job_code sendiri (JOB-<tahun>-<urutan>) dari hitungan
@@ -133,19 +146,65 @@ func (r *sqlcRepository) Count(ctx context.Context, filter ListFilter) (int64, e
 	return total, nil
 }
 
-func (r *sqlcRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status JobStatus, completedDate *time.Time) (Job, error) {
-	row, err := r.q.UpdateJobStatus(ctx, sqlcgen.UpdateJobStatusParams{
-		ID:            pgconv.ToUUID(id),
-		Status:        string(status),
-		CompletedDate: pgconv.ToDate(completedDate),
+// UpdateStatus membungkus UPDATE jobs + INSERT job_status_history dalam
+// satu transaksi (pgx.BeginFunc) - kalau salah satu gagal, keduanya batal.
+// Tanpa ini, ada risiko status jobs berubah tapi baris histori gagal
+// tercatat (atau sebaliknya), membuat audit trail tidak bisa dipercaya -
+// persis alasan yang sama dengan kenapa invoice.CreateFromJob dibungkus
+// transaksi (Atomicity).
+func (r *sqlcRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status JobStatus, completedDate *time.Time, changedBy uuid.UUID, notes *string) (Job, error) {
+	var result Job
+
+	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		q := r.q.WithTx(tx)
+
+		row, err := q.UpdateJobStatus(ctx, sqlcgen.UpdateJobStatusParams{
+			ID:            pgconv.ToUUID(id),
+			Status:        string(status),
+			CompletedDate: pgconv.ToDate(completedDate),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("update job status: %w", err)
+		}
+
+		if _, err := q.CreateJobStatusHistory(ctx, sqlcgen.CreateJobStatusHistoryParams{
+			JobID:     pgconv.ToUUID(id),
+			Status:    string(status),
+			ChangedBy: pgconv.ToUUID(changedBy),
+			Notes:     pgconv.ToText(notes),
+		}); err != nil {
+			return fmt.Errorf("insert job status history: %w", err)
+		}
+
+		result = fromRow(row)
+		return nil
 	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Job{}, ErrNotFound
-		}
-		return Job{}, fmt.Errorf("update job status: %w", err)
+		return Job{}, err
 	}
-	return fromRow(row), nil
+	return result, nil
+}
+
+func (r *sqlcRepository) ListStatusHistory(ctx context.Context, jobID uuid.UUID) ([]JobStatusHistory, error) {
+	rows, err := r.q.ListJobStatusHistory(ctx, pgconv.ToUUID(jobID))
+	if err != nil {
+		return nil, fmt.Errorf("list job status history: %w", err)
+	}
+	history := make([]JobStatusHistory, len(rows))
+	for i, row := range rows {
+		history[i] = JobStatusHistory{
+			ID:        pgconv.FromUUID(row.ID),
+			JobID:     pgconv.FromUUID(row.JobID),
+			Status:    JobStatus(row.Status),
+			ChangedBy: pgconv.FromUUID(row.ChangedBy),
+			ChangedAt: pgconv.FromTimestamptz(row.ChangedAt),
+			Notes:     pgconv.FromText(row.Notes),
+		}
+	}
+	return history, nil
 }
 
 // AssignTechnician: dua admin yang assign teknisi berbeda ke job yang sama

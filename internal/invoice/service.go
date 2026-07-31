@@ -146,3 +146,20 @@ func (s *Service) ListPayments(ctx context.Context, invoiceID uuid.UUID) ([]Paym
 	}
 	return payments, nil
 }
+
+// MarkOverdue dipanggil dari ticker reminder yang sama dengan
+// job.ReminderService (lihat cmd/api/main.go/runReminderScheduler) - BUKAN
+// infrastruktur terjadwal baru. invoice package tidak bisa memiliki
+// "ReminderService"-nya sendiri yang meniru job.ReminderService secara
+// langsung, karena invoice SUDAH mengimpor job (invoice.Repository memakai
+// job.NewRepository di dalam transaksi CreateFromJob) - kalau job balik
+// mengimpor invoice untuk method ini, akan jadi circular import. main.go
+// (yang sudah mengimpor keduanya) yang menjembatani kedua pemanggilan itu
+// di ticker yang sama.
+func (s *Service) MarkOverdue(ctx context.Context) ([]Invoice, error) {
+	overdue, err := s.repo.MarkOverdue(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("mark overdue invoices: %w", err)
+	}
+	return overdue, nil
+}

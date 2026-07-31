@@ -53,6 +53,16 @@ WHERE status NOT IN ('completed', 'cancelled')
   AND scheduled_date IS NOT NULL
   AND scheduled_date <= CURRENT_DATE + INTERVAL '1 day';
 
+-- name: CreateJobStatusHistory :one
+-- Dipanggil dari dalam transaksi yang sama dengan UpdateJobStatus (lihat
+-- repository.go) - satu baris histori per perubahan status.
+INSERT INTO job_status_history (job_id, status, changed_by, notes)
+VALUES ($1, $2, $3, $4)
+RETURNING *;
+
+-- name: ListJobStatusHistory :many
+SELECT * FROM job_status_history WHERE job_id = $1 ORDER BY changed_at ASC;
+
 -- name: AssignTechnician :one
 -- Optimistic locking: klausa "AND updated_at = $3" cuma berhasil mengubah
 -- baris kalau updated_at masih persis sama dengan yang terakhir dibaca

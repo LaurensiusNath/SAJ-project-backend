@@ -67,6 +67,12 @@ type Repository interface {
 	// penjelasan lost update yang dicegah lock ini.
 	RecordPayment(ctx context.Context, in RecordPaymentInput) (Payment, error)
 	ListPayments(ctx context.Context, invoiceID uuid.UUID) ([]Payment, error)
+	// MarkOverdue menandai semua invoice 'sent' yang due_date-nya sudah
+	// lewat jadi 'overdue' - dipanggil periodik dari ticker yang sama
+	// dengan job.ReminderService (lihat cmd/api/main.go). Idempotent:
+	// invoice yang sudah 'overdue' tidak ikut ter-UPDATE lagi (WHERE
+	// status = 'sent' saja), aman dipanggil berkali-kali.
+	MarkOverdue(ctx context.Context) ([]Invoice, error)
 }
 
 type sqlcRepository struct {
@@ -130,7 +136,15 @@ func (r *sqlcRepository) CreateFromJob(ctx context.Context, in CreateFromJobInpu
 			return fmt.Errorf("lock job row: %w", err)
 		}
 
-		jobRepo := job.NewRepository(q)
+		// pool sengaja nil di sini - jobRepo dipakai HANYA untuk GetByID
+		// (baca) di dalam transaksi yang sudah kita buka sendiri di atas;
+		// job.Repository.UpdateStatus (satu-satunya method yang butuh pool
+		// buat membuka transaksinya sendiri) tidak pernah dipanggil lewat
+		// instance ini. Membuka transaksi baru dari pool di sini juga salah
+		// secara semantik - kita sudah memegang row lock di transaksi yang
+		// sama, transaksi kedua dari pool akan pakai koneksi lain dan bisa
+		// saling menunggu (deadlock), bukan cuma boros.
+		jobRepo := job.NewRepository(nil, q)
 		j, err := jobRepo.GetByID(ctx, in.JobID)
 		if err != nil {
 			return err
@@ -389,6 +403,18 @@ func (r *sqlcRepository) ListPayments(ctx context.Context, invoiceID uuid.UUID) 
 		payments[i] = fromPaymentRow(row)
 	}
 	return payments, nil
+}
+
+func (r *sqlcRepository) MarkOverdue(ctx context.Context) ([]Invoice, error) {
+	rows, err := r.q.MarkOverdueInvoices(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("mark overdue invoices: %w", err)
+	}
+	invoices := make([]Invoice, len(rows))
+	for i, row := range rows {
+		invoices[i] = fromInvoiceRow(row)
+	}
+	return invoices, nil
 }
 
 func toPgTextFromStatus(s *Status) pgtype.Text {

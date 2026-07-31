@@ -48,3 +48,14 @@ UPDATE invoices
 SET status = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: MarkOverdueInvoices :many
+-- Dipanggil dari ticker reminder yang sama dengan job.ReminderService
+-- (lihat cmd/api/main.go/runReminderScheduler) - hanya invoice 'sent' yang
+-- due_date-nya sudah lewat HARI INI (bukan hari ini sendiri) yang
+-- ditandai overdue. Invoice 'paid'/'draft'/'cancelled'/yang sudah
+-- 'overdue' tidak tersentuh (idempotent - aman dipanggil berkali-kali).
+UPDATE invoices
+SET status = 'overdue', updated_at = now()
+WHERE status = 'sent' AND due_date < CURRENT_DATE
+RETURNING *;

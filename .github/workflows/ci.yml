@@ -26,8 +26,17 @@ jobs:
       # checkout yang bersih seperti di CI tidak punya folder ini sama
       # sekali, jadi harus di-generate ulang sebelum step apapun yang
       # meng-compile kode (test, build).
+      #
+      # Diambil sebagai binary jadi dari GitHub release, BUKAN `go install`
+      # (cara sebelumnya) - sqlc v1.31.1 butuh Go >= 1.26 untuk DIKOMPILASI,
+      # sementara go.mod project ini (dan Go yang di-setup step di atas)
+      # ada di 1.25 (naik dari 1.22 setelah testcontainers-go ditambahkan,
+      # lihat commit terkait). `go install` akan gagal persis seperti yang
+      # dulu ketemu di Dockerfile - solusinya sama: pakai binary yang sudah
+      # dikompilasi, bukan kompilasi ulang di sini.
       - name: Install sqlc
-        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+        run: |
+          curl -sSL https://github.com/sqlc-dev/sqlc/releases/download/v1.31.1/sqlc_1.31.1_linux_amd64.tar.gz | tar -xz -C /usr/local/bin sqlc
 
       - name: Generate sqlc code
         run: sqlc generate
@@ -48,6 +57,19 @@ jobs:
 
       - name: Test
         run: go test ./... -v
+
+      # Terpisah dari step Test di atas (lihat build tag "integration" di
+      # internal/testhelper, internal/invoice/integration_test.go,
+      # internal/job/integration_test.go) - test ini menyalakan Postgres
+      # ASLI lewat testcontainers-go untuk membuktikan locking (payment
+      # lost-update, assign optimistic-locking conflict) yang tidak bisa
+      # dibuktikan pakai fake Repository. ubuntu-latest sudah punya Docker
+      # daemon terpasang secara native, tidak perlu setup tambahan.
+      # WAJIB lolos di setiap PR (bukan cuma dijalankan manual) - ini yang
+      # sebelumnya cuma dibuktikan lewat script sekali pakai yang dihapus
+      # dari repo (lihat audit 2026-07-30).
+      - name: Integration test (testcontainers-go, real Postgres)
+        run: go test -tags=integration ./... -v
 
       - name: Build
         run: go build ./...

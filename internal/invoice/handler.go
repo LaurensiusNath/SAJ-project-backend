@@ -134,7 +134,7 @@ func (h *Handler) UpdateFakturPajak(c *gin.Context) {
 }
 
 type updateStatusRequest struct {
-	Status string `json:"status" binding:"required,oneof=draft sent paid cancelled"`
+	Status string `json:"status" binding:"required,oneof=draft sent paid overdue cancelled"`
 }
 
 func (h *Handler) UpdateStatus(c *gin.Context) {
