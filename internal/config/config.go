@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	AppPort     string
+	AppEnv      string
 	DatabaseURL string
 	RedisURL    string
 	JWTSecret   string
@@ -26,7 +27,13 @@ func Load() Config {
 	_ = godotenv.Load()
 
 	return Config{
-		AppPort:     getEnv("APP_PORT", "8080"),
+		AppPort: getEnv("APP_PORT", "8080"),
+		// AppEnv menentukan flag Secure di cookie access_token (auth.Handler.Login) -
+		// Secure cuma diaktifkan kalau APP_ENV=production (butuh HTTPS), supaya
+		// development lewat http://localhost tidak diam-diam gagal login karena
+		// browser menolak cookie Secure di koneksi non-HTTPS. Fallback "development"
+		// aman kalau env var ini belum di-set sama sekali (mis. lupa di .env lokal).
+		AppEnv:      getEnv("APP_ENV", "development"),
 		DatabaseURL: getEnv("DATABASE_URL", ""),
 		RedisURL:    getEnv("REDIS_URL", "localhost:6379"),
 		// JWTSecret sengaja TIDAK punya fallback aman seperti field lain -

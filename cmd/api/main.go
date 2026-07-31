@@ -66,7 +66,12 @@ func main() {
 	userRepo := user.NewRepository(queries)
 	userService := user.NewService(userRepo)
 	authService := auth.NewService(userRepo, cfg.JWTSecret)
-	authHandler := auth.NewHandler(authService)
+	// secureCookie=true HANYA kalau APP_ENV=production - development lewat
+	// http://localhost harus tetap bisa login (browser menolak cookie Secure
+	// di koneksi non-HTTPS). Lihat auth.Handler.setAccessTokenCookie dan
+	// docs/api-contract.md#0 (Catatan arsitektur 2026-07-31).
+	secureCookie := cfg.AppEnv == "production"
+	authHandler := auth.NewHandler(authService, secureCookie)
 
 	// publicGroup: SATU-SATUNYA route tanpa RequireAuth, sesuai
 	// api-contract.md ("semua endpoint kecuali /auth/login butuh Bearer token").

@@ -2,9 +2,12 @@
 ### v3 – disinkronkan dengan hasil audit implementasi (2026-07-30)
 ### Perubahan dari v2: tambah modul Auth/User, Notification; perbaiki status invoice;
 ### wajibkan nested data di GET /jobs/{id}; dokumentasikan bentuk `meta` per endpoint
+### Update 2026-07-31: strategi Auth berubah dari Bearer-token-only ke httpOnly cookie
+### (+ Bearer tetap didukung sebagai fallback), hasil diskusi strategi arsitektur frontend
+### (Next.js same-origin lewat proxy). Endpoint `POST /auth/logout` ditambahkan.
 
 **Base URL**: `/api/v1` (kecuali `/health` dan `/auth/login`, publik tanpa prefix/token)
-**Auth**: JWT Bearer token (HS256). Role: `owner`, `admin`, `teknisi`.
+**Auth**: JWT (HS256), dikirim lewat httpOnly cookie `access_token` (jalur utama, dipakai frontend Next.js) atau header `Authorization: Bearer <token>` (fallback — testing manual/Postman, tooling, kemungkinan client non-browser). Cookie diprioritaskan kalau keduanya dikirim. Role: `owner`, `admin`, `teknisi`.
 **Format response standar**:
 ```json
 // Success
@@ -17,12 +20,20 @@
 
 ---
 
-## 0. Modul Auth & User (baru – tidak ada di kontrak awal, ditambahkan saat implementasi)
+## 0. Modul Auth & User
 
 ### `POST /auth/login` – publik, tanpa token
 Body: `{ "email": "...", "password": "..." }`
-Response `200`: `{ "access_token": "<jwt>" }`
+Response `200`: set cookie `access_token` (`HttpOnly`, `SameSite=Lax`, `Secure` di production saja, `Path=/`, `Max-Age` sesuai masa berlaku JWT). Body response: `{ "user": { "id", "name", "email", "role" } }` — **tidak lagi** mengembalikan token mentah di JSON (kalau dikembalikan juga, tujuan httpOnly jadi percuma karena JS bisa baca dari response body).
 Response `401`: pesan identik untuk email tidak ditemukan ATAU password salah (sengaja, untuk tidak membocorkan mana yang salah).
+
+### `POST /auth/logout` – baru, sebelumnya tidak ada di kontrak sama sekali
+Butuh token valid (cookie/Bearer). Response `200`: set cookie `access_token` dengan `Max-Age=0` (hapus cookie di browser).
+
+### Auth Middleware – `RequireAuth`
+Dual support: baca token dari cookie `access_token` (jalur utama untuk frontend Next.js) atau header `Authorization: Bearer <token>` (tetap didukung untuk keperluan lain — testing manual, tooling, kemungkinan client non-browser di masa depan). Cookie diprioritaskan kalau keduanya ada.
+
+> **Catatan arsitektur (2026-07-31)**: keputusan pakai httpOnly cookie mengharuskan frontend & backend diakses dari origin yang sama — development pakai Next.js rewrites (`/api/*` → backend lokal), production pakai reverse proxy (Nginx/Caddy) di bawah satu domain. Ini alasan kenapa axios `baseURL` di frontend cukup `/api` (relative), tidak perlu env var URL backend absolut untuk request dari browser.
 
 ### `POST /users` – role `owner`/`admin`
 Body: `{ "name", "email", "password" (min 8 char), "role" (owner|admin|teknisi) }`

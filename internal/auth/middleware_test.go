@@ -118,6 +118,76 @@ func TestRequireAuth_ValidToken(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
+// TestRequireAuth_CookieOnly proves the primary auth path for the Next.js
+// frontend works: a valid access_token cookie with no Authorization header
+// at all must still authenticate successfully.
+func TestRequireAuth_CookieOnly(t *testing.T) {
+	svc := NewService(newFakeUserRepository(), "test-secret")
+	router := newTestRouter(svc)
+	valid := signTestToken(t, "test-secret", Claims{
+		UserID: uuid.New(),
+		Role:   user.RoleTeknisi,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: valid})
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// TestRequireAuth_CookiePrioritizedOverHeader proves the documented rule
+// (docs/api-contract.md#0: "Cookie diprioritaskan kalau keduanya ada") - a
+// valid cookie must win even when the Authorization header carries a token
+// that would fail validation on its own.
+func TestRequireAuth_CookiePrioritizedOverHeader(t *testing.T) {
+	svc := NewService(newFakeUserRepository(), "test-secret")
+	router := newTestRouter(svc)
+	validCookie := signTestToken(t, "test-secret", Claims{
+		UserID: uuid.New(),
+		Role:   user.RoleTeknisi,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: validCookie})
+	req.Header.Set("Authorization", "Bearer not-a-real-token")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "a valid cookie must authenticate even when the Authorization header is garbage")
+}
+
+// TestRequireAuth_EmptyCookieFallsBackToHeader proves Logout's Max-Age=0
+// cookie (empty value) doesn't accidentally lock out requests that still
+// carry a valid Bearer header - an empty cookie value must be treated as
+// "no cookie", not as "invalid token", falling through to the header.
+func TestRequireAuth_EmptyCookieFallsBackToHeader(t *testing.T) {
+	svc := NewService(newFakeUserRepository(), "test-secret")
+	router := newTestRouter(svc)
+	valid := signTestToken(t, "test-secret", Claims{
+		UserID: uuid.New(),
+		Role:   user.RoleTeknisi,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: ""})
+	req.Header.Set("Authorization", "Bearer "+valid)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
 func TestRequireRole(t *testing.T) {
 	svc := NewService(newFakeUserRepository(), "test-secret")
 

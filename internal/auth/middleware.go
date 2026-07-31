@@ -18,19 +18,22 @@ const (
 	contextKeyRole   = "auth_role"
 )
 
-// RequireAuth mem-parsing header "Authorization: Bearer <token>", validasi
-// JWT (tanda tangan + kedaluwarsa), lalu taruh user_id & role hasil decode
-// ke gin.Context - handler/middleware di belakangnya (termasuk RequireRole)
+// RequireAuth mengambil token JWT dari cookie access_token DULU (jalur utama
+// untuk frontend Next.js - lihat docs/api-contract.md#0), baru fallback ke
+// header "Authorization: Bearer <token>" kalau cookie-nya tidak ada (tetap
+// didukung untuk testing manual/Postman, tooling, client non-browser).
+// Setelah token didapat, validasi JWT (tanda tangan + kedaluwarsa) sama
+// persis seperti sebelumnya, lalu taruh user_id & role hasil decode ke
+// gin.Context - handler/middleware di belakangnya (termasuk RequireRole)
 // tinggal baca dari context, tidak decode ulang tokennya.
 //
 // Method receiver ("s *Service"), bukan fungsi package-level biasa, karena
 // butuh akses ke s.secret untuk validasi tanda tangan.
 func (s *Service) RequireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		header := c.GetHeader("Authorization")
-		tokenString, ok := strings.CutPrefix(header, "Bearer ")
-		if !ok || tokenString == "" {
-			httpresponse.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid Authorization header")
+		tokenString, ok := tokenFromRequest(c)
+		if !ok {
+			httpresponse.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid access token")
 			c.Abort()
 			return
 		}
@@ -58,6 +61,23 @@ func (s *Service) RequireAuth() gin.HandlerFunc {
 		c.Set(contextKeyRole, claims.Role)
 		c.Next()
 	}
+}
+
+// tokenFromRequest mengembalikan token mentah dari cookie access_token kalau
+// ada (dan tidak kosong - Logout menyetel cookie ini ke string kosong saat
+// menghapusnya, itu bukan token valid), atau fallback ke header
+// "Authorization: Bearer <token>". Cookie diprioritaskan sesuai kontrak.
+func tokenFromRequest(c *gin.Context) (string, bool) {
+	if cookieValue, err := c.Cookie(cookieName); err == nil && cookieValue != "" {
+		return cookieValue, true
+	}
+
+	header := c.GetHeader("Authorization")
+	tokenString, ok := strings.CutPrefix(header, "Bearer ")
+	if !ok || tokenString == "" {
+		return "", false
+	}
+	return tokenString, true
 }
 
 // RequireRole HARUS dipasang setelah RequireAuth di rantai middleware yang
