@@ -28,17 +28,20 @@ func NewService(userRepo user.Repository, secret string) *Service {
 	return &Service{userRepo: userRepo, secret: []byte(secret)}
 }
 
-func (s *Service) Login(ctx context.Context, email, password string) (string, error) {
+// Login mengembalikan token DAN user.User-nya sekaligus - handler.go butuh
+// keduanya (token untuk isi cookie access_token, user untuk body response
+// { "user": {...} } sesuai api-contract.md) tanpa query database kedua kali.
+func (s *Service) Login(ctx context.Context, email, password string) (string, user.User, error) {
 	u, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, user.ErrNotFound) {
-			return "", ErrInvalidCredentials
+			return "", user.User{}, ErrInvalidCredentials
 		}
-		return "", fmt.Errorf("get user by email: %w", err)
+		return "", user.User{}, fmt.Errorf("get user by email: %w", err)
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
-		return "", ErrInvalidCredentials
+		return "", user.User{}, ErrInvalidCredentials
 	}
 
 	now := time.Now()
@@ -55,7 +58,15 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, er
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString(s.secret)
 	if err != nil {
-		return "", fmt.Errorf("sign token: %w", err)
+		return "", user.User{}, fmt.Errorf("sign token: %w", err)
 	}
-	return signed, nil
+	return signed, u, nil
+}
+
+// AccessTokenTTLSeconds dipakai handler.go untuk Max-Age cookie access_token -
+// diekspor (bukan konstanta lokal duplikat) supaya kalau accessTokenTTL
+// berubah, umur cookie ikut berubah otomatis, tidak dua tempat yang harus
+// disinkronkan manual.
+func AccessTokenTTLSeconds() int {
+	return int(accessTokenTTL.Seconds())
 }

@@ -58,10 +58,12 @@ func TestService_Login_Success(t *testing.T) {
 	seeded := seedUser(t, repo, "owner@cncservis.local", "ChangeMe123!", user.RoleOwner)
 	svc := NewService(repo, "test-secret")
 
-	tokenString, err := svc.Login(context.Background(), "owner@cncservis.local", "ChangeMe123!")
+	tokenString, loggedInUser, err := svc.Login(context.Background(), "owner@cncservis.local", "ChangeMe123!")
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, tokenString)
+	assert.Equal(t, seeded.ID, loggedInUser.ID)
+	assert.Equal(t, seeded.Email, loggedInUser.Email)
 
 	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(*jwt.Token) (interface{}, error) {
@@ -78,7 +80,7 @@ func TestService_Login_WrongPassword(t *testing.T) {
 	seedUser(t, repo, "owner@cncservis.local", "ChangeMe123!", user.RoleOwner)
 	svc := NewService(repo, "test-secret")
 
-	_, err := svc.Login(context.Background(), "owner@cncservis.local", "wrong-password")
+	_, _, err := svc.Login(context.Background(), "owner@cncservis.local", "wrong-password")
 
 	require.ErrorIs(t, err, ErrInvalidCredentials)
 }
@@ -86,7 +88,7 @@ func TestService_Login_WrongPassword(t *testing.T) {
 func TestService_Login_UnknownEmail(t *testing.T) {
 	svc := NewService(newFakeUserRepository(), "test-secret")
 
-	_, err := svc.Login(context.Background(), "tidak-ada@cncservis.local", "apapun123")
+	_, _, err := svc.Login(context.Background(), "tidak-ada@cncservis.local", "apapun123")
 
 	require.ErrorIs(t, err, ErrInvalidCredentials, "unknown email must return the same error as wrong password, not leak which emails exist")
 }
