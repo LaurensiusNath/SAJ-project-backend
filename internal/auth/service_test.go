@@ -43,6 +43,17 @@ func (f *fakeUserRepository) GetByID(_ context.Context, id uuid.UUID) (user.User
 	return user.User{}, user.ErrNotFound
 }
 
+func (f *fakeUserRepository) List(_ context.Context, role *user.Role) ([]user.User, error) {
+	var result []user.User
+	for _, u := range f.usersByEmail {
+		if role != nil && u.Role != *role {
+			continue
+		}
+		result = append(result, u)
+	}
+	return result, nil
+}
+
 func seedUser(t *testing.T, repo *fakeUserRepository, email, password string, role user.Role) user.User {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -73,6 +84,27 @@ func TestService_Login_Success(t *testing.T) {
 	assert.True(t, token.Valid)
 	assert.Equal(t, seeded.ID, claims.UserID)
 	assert.Equal(t, user.RoleOwner, claims.Role)
+}
+
+func TestService_Me(t *testing.T) {
+	repo := newFakeUserRepository()
+	seeded := seedUser(t, repo, "owner@cncservis.local", "ChangeMe123!", user.RoleOwner)
+	svc := NewService(repo, "test-secret")
+
+	got, err := svc.Me(context.Background(), seeded.ID)
+
+	require.NoError(t, err)
+	assert.Equal(t, seeded.ID, got.ID)
+	assert.Equal(t, seeded.Email, got.Email)
+	assert.Equal(t, user.RoleOwner, got.Role)
+}
+
+func TestService_Me_NotFound(t *testing.T) {
+	svc := NewService(newFakeUserRepository(), "test-secret")
+
+	_, err := svc.Me(context.Background(), uuid.New())
+
+	require.ErrorIs(t, err, user.ErrNotFound)
 }
 
 func TestService_Login_WrongPassword(t *testing.T) {

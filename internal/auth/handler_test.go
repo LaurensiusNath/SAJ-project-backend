@@ -145,3 +145,69 @@ func TestLogout_ClearsCookie(t *testing.T) {
 	assert.Equal(t, -1, cookies[0].MaxAge)
 	assert.Empty(t, cookies[0].Value)
 }
+
+// TestMe_RequiresAuth proves GET /auth/me is NOT public - same requirement
+// as /auth/logout.
+func TestMe_RequiresAuth(t *testing.T) {
+	router, _ := newTestRouterWithHandler(false)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// TestMe_ReturnsSameShapeAsLogin proves the core contract requirement: the
+// body of GET /auth/me must be byte-for-byte identical in SHAPE to POST
+// /auth/login's body, so the frontend can reuse one TypeScript type for both.
+func TestMe_ReturnsSameShapeAsLogin(t *testing.T) {
+	router, repo := newTestRouterWithHandler(false)
+	seeded := seedUser(t, repo, "teknisi@cncservis.local", "ChangeMe123!", user.RoleTeknisi)
+
+	svc := NewService(repo, "test-secret")
+	token, _, err := svc.Login(context.Background(), "teknisi@cncservis.local", "ChangeMe123!")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: token})
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var decoded struct {
+		Success bool `json:"success"`
+		Data    struct {
+			User struct {
+				ID    string `json:"id"`
+				Name  string `json:"name"`
+				Email string `json:"email"`
+				Role  string `json:"role"`
+			} `json:"user"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &decoded))
+	assert.Equal(t, seeded.ID.String(), decoded.Data.User.ID)
+	assert.Equal(t, seeded.Name, decoded.Data.User.Name)
+	assert.Equal(t, seeded.Email, decoded.Data.User.Email)
+	assert.Equal(t, string(user.RoleTeknisi), decoded.Data.User.Role)
+}
+
+// TestMe_ViaBearerHeader proves the fallback path also works for /auth/me,
+// not just the cookie path.
+func TestMe_ViaBearerHeader(t *testing.T) {
+	router, repo := newTestRouterWithHandler(false)
+	seedUser(t, repo, "owner@cncservis.local", "ChangeMe123!", user.RoleOwner)
+
+	svc := NewService(repo, "test-secret")
+	token, _, err := svc.Login(context.Background(), "owner@cncservis.local", "ChangeMe123!")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
