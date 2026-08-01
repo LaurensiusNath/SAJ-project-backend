@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/nathan/cnc-pm-backend/internal/pgconv"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
@@ -23,6 +24,7 @@ type Repository interface {
 	Create(ctx context.Context, u User) (User, error)
 	GetByEmail(ctx context.Context, email string) (User, error)
 	GetByID(ctx context.Context, id uuid.UUID) (User, error)
+	List(ctx context.Context, role *Role) ([]User, error)
 }
 
 type sqlcRepository struct {
@@ -70,6 +72,31 @@ func (r *sqlcRepository) GetByID(ctx context.Context, id uuid.UUID) (User, error
 		return User{}, fmt.Errorf("get user by id: %w", err)
 	}
 	return fromRow(row), nil
+}
+
+// List tanpa limit/offset (lihat komentar di ListUsers query) - dipanggil
+// dari GET /users, dibatasi role owner/admin di level routing (sama seperti
+// Create).
+func (r *sqlcRepository) List(ctx context.Context, role *Role) ([]User, error) {
+	rows, err := r.q.ListUsers(ctx, toPgTextFromRole(role))
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	users := make([]User, len(rows))
+	for i, row := range rows {
+		users[i] = fromRow(row)
+	}
+	return users, nil
+}
+
+// toPgTextFromRole tetap khusus di sini (bukan masuk pgconv) karena terikat
+// ke tipe Role milik modul ini - pola yang sama dengan
+// toPgTextFromCustomerType di internal/customer/repository.go.
+func toPgTextFromRole(r *Role) pgtype.Text {
+	if r == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: string(*r), Valid: true}
 }
 
 func fromRow(row sqlcgen.User) User {

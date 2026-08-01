@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/nathan/cnc-pm-backend/internal/user"
@@ -61,6 +62,15 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, us
 		return "", user.User{}, fmt.Errorf("sign token: %w", err)
 	}
 	return signed, u, nil
+}
+
+// Me mengembalikan user.User untuk user_id yang sedang login (dari JWT
+// claim, lihat UserIDFromContext) - dipakai GET /auth/me supaya frontend
+// bisa tahu identitas user aktif setelah refresh halaman (JS tidak bisa
+// baca cookie HttpOnly-nya sendiri untuk decode token), tanpa perlu
+// endpoint decode-JWT terpisah.
+func (s *Service) Me(ctx context.Context, userID uuid.UUID) (user.User, error) {
+	return s.userRepo.GetByID(ctx, userID)
 }
 
 // AccessTokenTTLSeconds dipakai handler.go untuk Max-Age cookie access_token -

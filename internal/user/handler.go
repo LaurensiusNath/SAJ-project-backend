@@ -24,6 +24,7 @@ func NewHandler(svc *Service) *Handler {
 
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/users", h.Create)
+	rg.GET("/users", h.List)
 }
 
 type createUserRequest struct {
@@ -51,6 +52,24 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 	httpresponse.Success(c, http.StatusCreated, created)
+}
+
+// List menangani GET /users?role=... - role di query param string biasa
+// (bukan JSON body), jadi dikonversi ke Role dulu sebelum diteruskan ke
+// Service (yang memvalidasi apakah nilainya salah satu role yang dikenal).
+func (h *Handler) List(c *gin.Context) {
+	var roleFilter *Role
+	if raw := c.Query("role"); raw != "" {
+		r := Role(raw)
+		roleFilter = &r
+	}
+
+	users, err := h.svc.List(c.Request.Context(), roleFilter)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	httpresponse.Success(c, http.StatusOK, users)
 }
 
 func (h *Handler) respondError(c *gin.Context, err error) {

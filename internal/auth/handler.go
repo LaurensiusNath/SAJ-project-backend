@@ -38,6 +38,7 @@ func NewHandler(svc *Service, secureCookie bool) *Handler {
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/auth/login", h.Login)
 	rg.POST("/auth/logout", h.svc.RequireAuth(), h.Logout)
+	rg.GET("/auth/me", h.svc.RequireAuth(), h.Me)
 }
 
 type loginRequest struct {
@@ -70,6 +71,37 @@ func (h *Handler) Login(c *gin.Context) {
 	}
 
 	h.setAccessTokenCookie(c, token, AccessTokenTTLSeconds())
+	httpresponse.Success(c, http.StatusOK, gin.H{"user": userResponse{
+		ID: u.ID, Name: u.Name, Email: u.Email, Role: u.Role,
+	}})
+}
+
+// Me menangani GET /auth/me - "siapa saya" untuk user yang sedang login.
+// Bentuk response SENGAJA dibuat identik dengan body POST /auth/login
+// (userResponse yang sama), supaya frontend bisa reuse satu tipe TypeScript
+// untuk keduanya, bukan mendefinisikan dua tipe yang isinya sama persis.
+func (h *Handler) Me(c *gin.Context) {
+	userID, ok := UserIDFromContext(c)
+	if !ok {
+		httpresponse.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "missing authentication")
+		return
+	}
+
+	u, err := h.svc.Me(c.Request.Context(), userID)
+	if err != nil {
+		if errors.Is(err, user.ErrNotFound) {
+			// Token masih valid (lolos RequireAuth) tapi user-nya sudah
+			// tidak ada (mis. dihapus setelah token diterbitkan) - ini
+			// diperlakukan sebagai masalah AUTH ("identitas kamu sudah
+			// tidak valid"), bukan 404 generic seperti GetByID di modul
+			// lain - supaya frontend tahu harus redirect ke login/logout,
+			// bukan menampilkan halaman "resource not found".
+			httpresponse.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "user tidak ditemukan")
+			return
+		}
+		httpresponse.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+		return
+	}
 	httpresponse.Success(c, http.StatusOK, gin.H{"user": userResponse{
 		ID: u.ID, Name: u.Name, Email: u.Email, Role: u.Role,
 	}})

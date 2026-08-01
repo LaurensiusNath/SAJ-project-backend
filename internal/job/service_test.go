@@ -50,6 +50,9 @@ func (noopUserRepo) GetByEmail(context.Context, string) (user.User, error) {
 func (noopUserRepo) GetByID(context.Context, uuid.UUID) (user.User, error) {
 	return user.User{}, user.ErrNotFound
 }
+func (noopUserRepo) List(context.Context, *user.Role) ([]user.User, error) {
+	return nil, nil
+}
 
 type noopNotifier struct{}
 

@@ -38,6 +38,17 @@ func (f *fakeRepository) GetByEmail(_ context.Context, email string) (User, erro
 	return u, nil
 }
 
+func (f *fakeRepository) List(_ context.Context, role *Role) ([]User, error) {
+	var result []User
+	for _, u := range f.usersByEmail {
+		if role != nil && u.Role != *role {
+			continue
+		}
+		result = append(result, u)
+	}
+	return result, nil
+}
+
 func (f *fakeRepository) GetByID(_ context.Context, id uuid.UUID) (User, error) {
 	for _, u := range f.usersByEmail {
 		if u.ID == id {
@@ -92,6 +103,40 @@ func TestService_Create(t *testing.T) {
 				"stored hash must verify against the original password")
 		})
 	}
+}
+
+func TestService_List(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	ctx := context.Background()
+	_, err := svc.Create(ctx, CreateInput{Name: "Owner", Email: "owner@cncservis.local", Password: "password123", Role: RoleOwner})
+	require.NoError(t, err)
+	_, err = svc.Create(ctx, CreateInput{Name: "Teknisi Satu", Email: "t1@cncservis.local", Password: "password123", Role: RoleTeknisi})
+	require.NoError(t, err)
+	_, err = svc.Create(ctx, CreateInput{Name: "Teknisi Dua", Email: "t2@cncservis.local", Password: "password123", Role: RoleTeknisi})
+	require.NoError(t, err)
+
+	t.Run("no filter returns all users", func(t *testing.T) {
+		got, err := svc.List(ctx, nil)
+		require.NoError(t, err)
+		assert.Len(t, got, 3)
+	})
+
+	t.Run("filter by role - dipakai frontend untuk dropdown assign teknisi", func(t *testing.T) {
+		teknisi := RoleTeknisi
+		got, err := svc.List(ctx, &teknisi)
+		require.NoError(t, err)
+		assert.Len(t, got, 2)
+		for _, u := range got {
+			assert.Equal(t, RoleTeknisi, u.Role)
+		}
+	})
+
+	t.Run("invalid role filter is rejected", func(t *testing.T) {
+		invalid := Role("bukan-valid")
+		_, err := svc.List(ctx, &invalid)
+		require.ErrorIs(t, err, ErrInvalidRole)
+	})
 }
 
 func TestService_Create_DuplicateEmail(t *testing.T) {

@@ -51,3 +51,18 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (User, error) {
 	}
 	return created, nil
 }
+
+// List dipanggil dari GET /users, dibatasi role owner/admin di level
+// routing (sama seperti Create). roleFilter nil berarti tanpa filter (semua
+// role) - kalau diisi, harus salah satu role yang valid (mis. dipakai
+// frontend untuk dropdown assign teknisi: ?role=teknisi).
+func (s *Service) List(ctx context.Context, roleFilter *Role) ([]User, error) {
+	if roleFilter != nil && !roleFilter.Valid() {
+		return nil, ErrInvalidRole
+	}
+	users, err := s.repo.List(ctx, roleFilter)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	return users, nil
+}
