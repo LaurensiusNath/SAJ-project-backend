@@ -39,7 +39,15 @@ Dual support: baca token dari cookie `access_token` (jalur utama untuk frontend 
 Body: `{ "name", "email", "password" (min 8 char), "role" (owner|admin|teknisi) }`
 Response `201`: object User **tanpa** `password_hash`.
 
-> **Backlog**: belum ada `GET /users`, `PUT /users/{id}`, `DELETE /users/{id}`. Cukup untuk kebutuhan sekarang (akun dibuat manual oleh owner/admin), tapi perlu ditambah kalau jumlah teknisi bertambah banyak.
+### `GET /users` – role `owner`/`admin` – baru, menutup blocker assign-teknisi
+Query: `role` (opsional, filter — dipakai frontend untuk dropdown assign teknisi: `?role=teknisi`)
+Response `200`: array User (`id`, `name`, `email`, `role`, `created_at`) **tanpa** `password_hash`. **Tanpa pagination** (jumlah user diasumsikan selalu kecil, sama seperti Machines).
+
+### `GET /auth/me` – semua role yang login – baru, menutup blocker info user setelah refresh
+Tanpa body/query.
+Response `200`: `{ "user": { "id", "name", "email", "role" } }` — bentuk **sama persis** dengan body `POST /auth/login`, sumber dari token yang sedang aktif (cookie/Bearer).
+
+> **Backlog**: `PUT /users/{id}`, `DELETE /users/{id}` masih belum ada — belum ada kebutuhan konkret untuk itu.
 
 ---
 
