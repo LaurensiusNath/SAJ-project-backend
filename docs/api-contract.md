@@ -111,6 +111,9 @@ Body: `{ status (required, requested|scheduled|in_progress|completed|cancelled),
 Body: `{ technician_id (required), expected_updated_at (required, RFC3339) }`
 **Optimistic locking**: `expected_updated_at` dicocokkan ke `jobs.updated_at` saat ini di dalam `WHERE` clause update. Kalau tidak cocok (sudah diubah request lain) — `409 CONFLICT`. Dipilih di atas pessimistic locking secara sadar, karena pessimistic cuma menyerialkan urutan tulis (tetap silent-overwrite), sedangkan optimistic mendeteksi & menolak konfliknya secara eksplisit.
 
+### `GET /jobs/{id}/invoice`
+Cek apakah job ini sudah punya invoice (`invoices.job_id` UNIQUE — maksimal satu baris). Response `200` + object Invoice, bentuknya **sama persis** dengan response `POST /jobs/{id}/invoice` (lihat bagian 4). Response `404` kalau job ini belum punya invoice — bukan `200` dengan `data: null`, supaya frontend gampang membedakan "belum di-invoice" dari "request gagal".
+
 ### Sub-resource: Job Costs
 `POST /jobs/{id}/costs` – body: `{ cost_type (required, labor|spare_part|transport|other), description (required), quantity (required), purchase_price, selling_price (required) }`. `purchase_price` ditolak `400` kalau `cost_type != spare_part`. `subtotal` generated column, tidak bisa diisi client.
 `GET /jobs/{id}/costs` – tanpa pagination. `meta: { total_selling, total_margin }` (bentuk khusus, beda dari list lain — sengaja, karena kebutuhannya beda: total buat subtotal invoice, margin buat insight, bukan buat navigasi halaman).

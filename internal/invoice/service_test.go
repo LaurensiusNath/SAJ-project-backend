@@ -62,6 +62,15 @@ func (f *fakeRepository) GetByID(_ context.Context, id uuid.UUID) (Invoice, erro
 	return inv, nil
 }
 
+func (f *fakeRepository) GetByJobID(_ context.Context, jobID uuid.UUID) (Invoice, error) {
+	for _, inv := range f.invoices {
+		if inv.JobID == jobID {
+			return inv, nil
+		}
+	}
+	return Invoice{}, ErrNotFound
+}
+
 func (f *fakeRepository) List(_ context.Context, filter ListFilter, _, _ int32) ([]Invoice, error) {
 	var result []Invoice
 	for _, inv := range f.invoices {
@@ -172,6 +181,29 @@ func TestService_CreateFromJob_AlreadyInvoiced(t *testing.T) {
 
 	_, err = svc.CreateFromJob(context.Background(), jobID, CreateInput{})
 	require.ErrorIs(t, err, ErrAlreadyInvoiced)
+}
+
+func TestService_GetByJobID(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	jobID := uuid.New()
+
+	created, err := svc.CreateFromJob(context.Background(), jobID, CreateInput{})
+	require.NoError(t, err)
+
+	got, err := svc.GetByJobID(context.Background(), jobID)
+
+	require.NoError(t, err)
+	assert.Equal(t, created.ID, got.ID)
+	assert.Equal(t, jobID, got.JobID)
+}
+
+func TestService_GetByJobID_NotFound(t *testing.T) {
+	svc := NewService(newFakeRepository())
+
+	_, err := svc.GetByJobID(context.Background(), uuid.New())
+
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestService_List_InvalidStatus(t *testing.T) {

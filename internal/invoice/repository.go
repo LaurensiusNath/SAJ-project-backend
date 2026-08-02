@@ -58,6 +58,10 @@ type Repository interface {
 	// mencegah race check-then-act).
 	CreateFromJob(ctx context.Context, in CreateFromJobInput) (Invoice, error)
 	GetByID(ctx context.Context, id uuid.UUID) (Invoice, error)
+	// GetByJobID dipakai GET /jobs/{id}/invoice - beda dari pengecekan
+	// internal di CreateFromJob (yang jalan di dalam transaksi terkunci),
+	// ini query baca biasa di luar transaksi apapun.
+	GetByJobID(ctx context.Context, jobID uuid.UUID) (Invoice, error)
 	List(ctx context.Context, filter ListFilter, limit, offset int32) ([]Invoice, error)
 	Count(ctx context.Context, filter ListFilter) (int64, error)
 	UpdateFakturPajak(ctx context.Context, id uuid.UUID, nomorFakturPajak string) (Invoice, error)
@@ -261,6 +265,17 @@ func (r *sqlcRepository) GetByID(ctx context.Context, id uuid.UUID) (Invoice, er
 			return Invoice{}, ErrNotFound
 		}
 		return Invoice{}, fmt.Errorf("get invoice by id: %w", err)
+	}
+	return fromInvoiceRow(row), nil
+}
+
+func (r *sqlcRepository) GetByJobID(ctx context.Context, jobID uuid.UUID) (Invoice, error) {
+	row, err := r.q.GetInvoiceByJobID(ctx, pgconv.ToUUID(jobID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Invoice{}, ErrNotFound
+		}
+		return Invoice{}, fmt.Errorf("get invoice by job id: %w", err)
 	}
 	return fromInvoiceRow(row), nil
 }
