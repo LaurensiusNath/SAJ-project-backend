@@ -71,13 +71,16 @@ func (f *fakeRepository) GetByJobID(_ context.Context, jobID uuid.UUID) (Invoice
 	return Invoice{}, ErrNotFound
 }
 
-func (f *fakeRepository) List(_ context.Context, filter ListFilter, _, _ int32) ([]Invoice, error) {
-	var result []Invoice
+func (f *fakeRepository) List(_ context.Context, filter ListFilter, _, _ int32) ([]InvoiceListItem, error) {
+	var result []InvoiceListItem
 	for _, inv := range f.invoices {
 		if filter.Status != nil && inv.Status != *filter.Status {
 			continue
 		}
-		result = append(result, inv)
+		// job_code/customer_name kosong di sini dengan sengaja - fakeRepository
+		// ini tidak mereplikasi JOIN sungguhan (lihat catatan di atas file
+		// soal fakeRepository tidak mereplikasi mekanisme Postgres asli).
+		result = append(result, InvoiceListItem{Invoice: inv})
 	}
 	return result, nil
 }

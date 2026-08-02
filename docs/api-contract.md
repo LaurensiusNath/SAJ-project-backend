@@ -150,6 +150,15 @@ Body: `{ status (required, draft|sent|paid|overdue|cancelled) }`
 ### `GET /invoices`, `GET /invoices/{id}`
 `meta: { page, total }` untuk list. Detail invoice: object polos.
 
+`GET /invoices` (list) menambahkan dua field flat di tiap item — `job_code`
+dan `customer_name` — hasil JOIN ke `jobs`+`customers`, supaya frontend bisa
+menampilkan identitas job/customer yang manusiawi tanpa request tambahan per
+baris. **Sengaja flat, bukan nested object job/customer penuh** seperti di
+`GET /jobs/{id}` — payload list harus tetap ringan. `GET /invoices/{id}`
+(detail) TIDAK mendapat field ini — tetap object `Invoice` polos, cukup
+`job_id` mentah (kalau butuh nama customer/job_code, gunakan `GET /jobs/{id}`
+dengan `job_id` tersebut).
+
 ### `POST /invoices/{id}/payments`
 Body: `{ amount (required), payment_method (required, transfer|cash|other), bukti_potong_pph23_ref, notes }`
 

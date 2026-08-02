@@ -61,7 +61,7 @@ type ListParams struct {
 }
 
 type ListResult struct {
-	Invoices []Invoice
+	Invoices []InvoiceListItem
 	Total    int64
 }
 

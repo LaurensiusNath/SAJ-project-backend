@@ -28,9 +28,16 @@ SELECT * FROM invoices WHERE job_id = $1;
 SELECT * FROM invoices WHERE id = $1 FOR UPDATE;
 
 -- name: ListInvoices :many
-SELECT * FROM invoices
-WHERE (status = sqlc.narg('status') OR sqlc.narg('status') IS NULL)
-ORDER BY created_at DESC
+-- JOIN ke jobs+customers cuma untuk dua kolom flat (job_code, customer_name) -
+-- list endpoint butuh identitas yang manusiawi tanpa request tambahan dari
+-- frontend, tapi sengaja TIDAK nested object penuh seperti GetInvoiceByID/
+-- detail (lihat domain.go InvoiceListItem) supaya payload list tetap ringan.
+SELECT invoices.*, jobs.job_code, customers.name AS customer_name
+FROM invoices
+JOIN jobs ON jobs.id = invoices.job_id
+JOIN customers ON customers.id = jobs.customer_id
+WHERE (invoices.status = sqlc.narg('status') OR sqlc.narg('status') IS NULL)
+ORDER BY invoices.created_at DESC
 LIMIT $1 OFFSET $2;
 
 -- name: CountInvoices :one
