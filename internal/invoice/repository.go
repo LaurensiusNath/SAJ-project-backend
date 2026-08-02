@@ -58,7 +58,11 @@ type Repository interface {
 	// mencegah race check-then-act).
 	CreateFromJob(ctx context.Context, in CreateFromJobInput) (Invoice, error)
 	GetByID(ctx context.Context, id uuid.UUID) (Invoice, error)
-	List(ctx context.Context, filter ListFilter, limit, offset int32) ([]Invoice, error)
+	// GetByJobID dipakai GET /jobs/{id}/invoice - beda dari pengecekan
+	// internal di CreateFromJob (yang jalan di dalam transaksi terkunci),
+	// ini query baca biasa di luar transaksi apapun.
+	GetByJobID(ctx context.Context, jobID uuid.UUID) (Invoice, error)
+	List(ctx context.Context, filter ListFilter, limit, offset int32) ([]InvoiceListItem, error)
 	Count(ctx context.Context, filter ListFilter) (int64, error)
 	UpdateFakturPajak(ctx context.Context, id uuid.UUID, nomorFakturPajak string) (Invoice, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status Status) (Invoice, error)
@@ -265,7 +269,18 @@ func (r *sqlcRepository) GetByID(ctx context.Context, id uuid.UUID) (Invoice, er
 	return fromInvoiceRow(row), nil
 }
 
-func (r *sqlcRepository) List(ctx context.Context, filter ListFilter, limit, offset int32) ([]Invoice, error) {
+func (r *sqlcRepository) GetByJobID(ctx context.Context, jobID uuid.UUID) (Invoice, error) {
+	row, err := r.q.GetInvoiceByJobID(ctx, pgconv.ToUUID(jobID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Invoice{}, ErrNotFound
+		}
+		return Invoice{}, fmt.Errorf("get invoice by job id: %w", err)
+	}
+	return fromInvoiceRow(row), nil
+}
+
+func (r *sqlcRepository) List(ctx context.Context, filter ListFilter, limit, offset int32) ([]InvoiceListItem, error) {
 	rows, err := r.q.ListInvoices(ctx, sqlcgen.ListInvoicesParams{
 		Limit:  limit,
 		Offset: offset,
@@ -274,9 +289,9 @@ func (r *sqlcRepository) List(ctx context.Context, filter ListFilter, limit, off
 	if err != nil {
 		return nil, fmt.Errorf("list invoices: %w", err)
 	}
-	invoices := make([]Invoice, len(rows))
+	invoices := make([]InvoiceListItem, len(rows))
 	for i, row := range rows {
-		invoices[i] = fromInvoiceRow(row)
+		invoices[i] = fromListInvoicesRow(row)
 	}
 	return invoices, nil
 }
@@ -442,6 +457,31 @@ func fromInvoiceRow(row sqlcgen.Invoice) Invoice {
 		DueDate:              pgconv.FromDate(row.DueDate),
 		CreatedAt:            pgconv.FromTimestamptz(row.CreatedAt),
 		UpdatedAt:            pgconv.FromTimestamptz(row.UpdatedAt),
+	}
+}
+
+func fromListInvoicesRow(row sqlcgen.ListInvoicesRow) InvoiceListItem {
+	return InvoiceListItem{
+		Invoice: Invoice{
+			ID:                   pgconv.FromUUID(row.ID),
+			InvoiceNumber:        row.InvoiceNumber,
+			NomorFakturPajak:     pgconv.FromText(row.NomorFakturPajak),
+			JobID:                pgconv.FromUUID(row.JobID),
+			Subtotal:             pgconv.FromNumeric(row.Subtotal),
+			TaxPercentage:        pgconv.FromNumeric(row.TaxPercentage),
+			TaxAmount:            pgconv.FromNumeric(row.TaxAmount),
+			Total:                pgconv.FromNumeric(row.Total),
+			DPPPPh23:             pgconv.FromNumeric(row.DppPph23),
+			PPh23Rate:            pgconv.FromNumeric(row.Pph23Rate),
+			PPh23EstimatedAmount: pgconv.FromNumeric(row.Pph23EstimatedAmount),
+			ExpectedReceivable:   pgconv.FromNumeric(row.ExpectedReceivable),
+			Status:               Status(row.Status),
+			DueDate:              pgconv.FromDate(row.DueDate),
+			CreatedAt:            pgconv.FromTimestamptz(row.CreatedAt),
+			UpdatedAt:            pgconv.FromTimestamptz(row.UpdatedAt),
+		},
+		JobCode:      row.JobCode,
+		CustomerName: row.CustomerName,
 	}
 }
 

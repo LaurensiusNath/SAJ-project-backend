@@ -47,6 +47,13 @@ func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (Invoice, error) {
 	return s.repo.GetByID(ctx, id)
 }
 
+// GetByJobID dipakai GET /jobs/{id}/invoice - response-nya sengaja bentuk
+// Invoice polos, sama persis dengan POST /jobs/{id}/invoice (bukan
+// InvoiceListItem, karena ini bukan endpoint list).
+func (s *Service) GetByJobID(ctx context.Context, jobID uuid.UUID) (Invoice, error) {
+	return s.repo.GetByJobID(ctx, jobID)
+}
+
 type ListParams struct {
 	Status *Status
 	Page   int32
@@ -54,7 +61,7 @@ type ListParams struct {
 }
 
 type ListResult struct {
-	Invoices []Invoice
+	Invoices []InvoiceListItem
 	Total    int64
 }
 

@@ -95,6 +95,17 @@ type Invoice struct {
 	UpdatedAt            time.Time       `json:"updated_at"`
 }
 
+// InvoiceListItem adalah bentuk satu baris di GET /invoices - Invoice biasa
+// PLUS dua field flat (JobCode, CustomerName) supaya frontend list bisa
+// menampilkan identitas manusiawi tanpa request tambahan per baris. Sengaja
+// field flat, BUKAN nested object job/customer penuh seperti di GetByID -
+// list endpoint butuh tetap ringan (lihat db/queries/invoices.sql ListInvoices).
+type InvoiceListItem struct {
+	Invoice
+	JobCode      string `json:"job_code"`
+	CustomerName string `json:"customer_name"`
+}
+
 // Payment adalah satu baris pembayaran terhadap sebuah Invoice.
 type Payment struct {
 	ID                  uuid.UUID       `json:"id"`

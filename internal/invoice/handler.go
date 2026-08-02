@@ -25,6 +25,7 @@ func NewHandler(svc *Service) *Handler {
 
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/jobs/:id/invoice", h.CreateFromJob)
+	rg.GET("/jobs/:id/invoice", h.GetByJob)
 	rg.GET("/invoices", h.List)
 	rg.GET("/invoices/:id", h.GetByID)
 	rg.PATCH("/invoices/:id/faktur-pajak", h.UpdateFakturPajak)
@@ -66,6 +67,25 @@ func (h *Handler) CreateFromJob(c *gin.Context) {
 		return
 	}
 	httpresponse.Success(c, http.StatusCreated, created)
+}
+
+// GetByJob melayani GET /jobs/{id}/invoice - dipakai frontend cek "job ini
+// sudah punya invoice belum" tanpa perlu tahu invoice ID-nya lebih dulu.
+// 404 (bukan 200 dengan data null) kalau belum ada, sesuai konvensi
+// resource-not-found lain di project ini (lihat respondError -> ErrNotFound).
+func (h *Handler) GetByJob(c *gin.Context) {
+	jobID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid job id")
+		return
+	}
+
+	found, err := h.svc.GetByJobID(c.Request.Context(), jobID)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	httpresponse.Success(c, http.StatusOK, found)
 }
 
 func (h *Handler) GetByID(c *gin.Context) {

@@ -111,6 +111,9 @@ Body: `{ status (required, requested|scheduled|in_progress|completed|cancelled),
 Body: `{ technician_id (required), expected_updated_at (required, RFC3339) }`
 **Optimistic locking**: `expected_updated_at` dicocokkan ke `jobs.updated_at` saat ini di dalam `WHERE` clause update. Kalau tidak cocok (sudah diubah request lain) — `409 CONFLICT`. Dipilih di atas pessimistic locking secara sadar, karena pessimistic cuma menyerialkan urutan tulis (tetap silent-overwrite), sedangkan optimistic mendeteksi & menolak konfliknya secara eksplisit.
 
+### `GET /jobs/{id}/invoice`
+Cek apakah job ini sudah punya invoice (`invoices.job_id` UNIQUE — maksimal satu baris). Response `200` + object Invoice, bentuknya **sama persis** dengan response `POST /jobs/{id}/invoice` (lihat bagian 4). Response `404` kalau job ini belum punya invoice — bukan `200` dengan `data: null`, supaya frontend gampang membedakan "belum di-invoice" dari "request gagal".
+
 ### Sub-resource: Job Costs
 `POST /jobs/{id}/costs` – body: `{ cost_type (required, labor|spare_part|transport|other), description (required), quantity (required), purchase_price, selling_price (required) }`. `purchase_price` ditolak `400` kalau `cost_type != spare_part`. `subtotal` generated column, tidak bisa diisi client.
 `GET /jobs/{id}/costs` – tanpa pagination. `meta: { total_selling, total_margin }` (bentuk khusus, beda dari list lain — sengaja, karena kebutuhannya beda: total buat subtotal invoice, margin buat insight, bukan buat navigasi halaman).
@@ -144,8 +147,19 @@ Body: `{ nomor_faktur_pajak (required) }`
 Body: `{ status (required, draft|sent|paid|overdue|cancelled) }`
 **`overdue` sebaiknya di-set otomatis**, bukan cuma manual: perluas `ReminderService` (ticker per jam yang sudah ada untuk reminder jadwal) supaya juga menandai invoice `sent` yang `due_date`-nya sudah lewat dan belum lunas jadi `overdue`. `cancelled` tetap manual (keputusan sengaja membatalkan invoice).
 
+**Tidak ada state-machine di endpoint ini** — lihat Catatan Desain & Keputusan Teknis Kunci #6.
+
 ### `GET /invoices`, `GET /invoices/{id}`
 `meta: { page, total }` untuk list. Detail invoice: object polos.
+
+`GET /invoices` (list) menambahkan dua field flat di tiap item — `job_code`
+dan `customer_name` — hasil JOIN ke `jobs`+`customers`, supaya frontend bisa
+menampilkan identitas job/customer yang manusiawi tanpa request tambahan per
+baris. **Sengaja flat, bukan nested object job/customer penuh** seperti di
+`GET /jobs/{id}` — payload list harus tetap ringan. `GET /invoices/{id}`
+(detail) TIDAK mendapat field ini — tetap object `Invoice` polos, cukup
+`job_id` mentah (kalau butuh nama customer/job_code, gunakan `GET /jobs/{id}`
+dengan `job_id` tersebut).
 
 ### `POST /invoices/{id}/payments`
 Body: `{ amount (required), payment_method (required, transfer|cash|other), bukti_potong_pph23_ref, notes }`
@@ -180,6 +194,7 @@ Tidak ada endpoint HTTP publik untuk modul ini saat ini — murni internal, dipi
 3. **Kenapa `subtotal` di `job_costs` jadi `GENERATED ALWAYS AS ... STORED` column di level database, bukan cuma dihitung di Go?** Menjamin konsistensi di level data itu sendiri — bahkan kalau ada write langsung ke DB di luar aplikasi (migrasi data, query manual), subtotal tidak akan pernah nyasar dari `selling_price * quantity`.
 4. **Kenapa `PATCH /jobs/{id}/assign` pakai optimistic locking, bukan pessimistic seperti di payment?** Kasusnya beda: di payment, kita *mau* request kedua menunggu lalu diproses berurutan (uang tetap harus tercatat semua). Di assign, kita *mau* request kedua **ditolak dan diberi tahu ada konflik** (bukan cuma mengantre lalu diam-diam menimpa) — supaya admin kedua sadar perlu re-check kondisi terbaru sebelum assign ulang.
 5. **Kenapa notifikasi "fire-and-forget"?** Karena notifikasi itu pendukung, bukan sumber kebenaran finansial — kalau email gagal terkirim, itu tidak boleh membatalkan invoice yang sudah sah dibuat. Beda prinsip dengan transaksi finansial yang harus atomic.
+6. **`PATCH /invoices/{id}/status` TIDAK punya state-machine/transition guard** — diverifikasi langsung terhadap implementasi (`internal/invoice/service.go` `UpdateStatus`, `internal/invoice/domain.go` `Status.Valid()`) dan constraint database (`invoices_status_check`, lihat migration `000014`), keduanya cuma memvalidasi "apakah salah satu dari 5 nilai enum", bukan "apakah transisi dari status saat ini valid". Dibuktikan lewat request nyata terhadap server berjalan: `draft → paid` (skip `sent`), `paid → draft` (mundur), dan `cancelled → sent` (membangkitkan invoice yang sudah dibatalkan) semuanya diterima `200`. **Konsekuensi untuk frontend**: pembatasan opsi manual (mis. cuma menyediakan tombol "Tandai Terkirim"/"Batalkan" di UI) murni tanggung jawab frontend — backend tidak menegakkan apa-apa di luar keanggotaan enum. Kalau nanti butuh state-machine sungguhan, itu perubahan desain baru, bukan bug fix (tidak ada regresi di sini — perilaku ini konsisten sejak `PATCH /invoices/{id}/status` pertama dibuat).
 
 ---
 
