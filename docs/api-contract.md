@@ -147,6 +147,8 @@ Body: `{ nomor_faktur_pajak (required) }`
 Body: `{ status (required, draft|sent|paid|overdue|cancelled) }`
 **`overdue` sebaiknya di-set otomatis**, bukan cuma manual: perluas `ReminderService` (ticker per jam yang sudah ada untuk reminder jadwal) supaya juga menandai invoice `sent` yang `due_date`-nya sudah lewat dan belum lunas jadi `overdue`. `cancelled` tetap manual (keputusan sengaja membatalkan invoice).
 
+**Tidak ada state-machine di endpoint ini** — lihat Catatan Desain & Keputusan Teknis Kunci #6.
+
 ### `GET /invoices`, `GET /invoices/{id}`
 `meta: { page, total }` untuk list. Detail invoice: object polos.
 
@@ -192,6 +194,7 @@ Tidak ada endpoint HTTP publik untuk modul ini saat ini — murni internal, dipi
 3. **Kenapa `subtotal` di `job_costs` jadi `GENERATED ALWAYS AS ... STORED` column di level database, bukan cuma dihitung di Go?** Menjamin konsistensi di level data itu sendiri — bahkan kalau ada write langsung ke DB di luar aplikasi (migrasi data, query manual), subtotal tidak akan pernah nyasar dari `selling_price * quantity`.
 4. **Kenapa `PATCH /jobs/{id}/assign` pakai optimistic locking, bukan pessimistic seperti di payment?** Kasusnya beda: di payment, kita *mau* request kedua menunggu lalu diproses berurutan (uang tetap harus tercatat semua). Di assign, kita *mau* request kedua **ditolak dan diberi tahu ada konflik** (bukan cuma mengantre lalu diam-diam menimpa) — supaya admin kedua sadar perlu re-check kondisi terbaru sebelum assign ulang.
 5. **Kenapa notifikasi "fire-and-forget"?** Karena notifikasi itu pendukung, bukan sumber kebenaran finansial — kalau email gagal terkirim, itu tidak boleh membatalkan invoice yang sudah sah dibuat. Beda prinsip dengan transaksi finansial yang harus atomic.
+6. **`PATCH /invoices/{id}/status` TIDAK punya state-machine/transition guard** — diverifikasi langsung terhadap implementasi (`internal/invoice/service.go` `UpdateStatus`, `internal/invoice/domain.go` `Status.Valid()`) dan constraint database (`invoices_status_check`, lihat migration `000014`), keduanya cuma memvalidasi "apakah salah satu dari 5 nilai enum", bukan "apakah transisi dari status saat ini valid". Dibuktikan lewat request nyata terhadap server berjalan: `draft → paid` (skip `sent`), `paid → draft` (mundur), dan `cancelled → sent` (membangkitkan invoice yang sudah dibatalkan) semuanya diterima `200`. **Konsekuensi untuk frontend**: pembatasan opsi manual (mis. cuma menyediakan tombol "Tandai Terkirim"/"Batalkan" di UI) murni tanggung jawab frontend — backend tidak menegakkan apa-apa di luar keanggotaan enum. Kalau nanti butuh state-machine sungguhan, itu perubahan desain baru, bukan bug fix (tidak ada regresi di sini — perilaku ini konsisten sejak `PATCH /invoices/{id}/status` pertama dibuat).
 
 ---
 
