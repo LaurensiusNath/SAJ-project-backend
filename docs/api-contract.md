@@ -187,6 +187,63 @@ Tidak ada endpoint HTTP publik untuk modul ini saat ini — murni internal, dipi
 
 ---
 
+## 6. Modul Dashboard
+
+Modul pertama yang murni agregat (bukan CRUD/list-berpaginasi) — baca lintas
+`invoices`, `payments`, `jobs`, `customers` sekaligus dalam satu response.
+
+### `GET /dashboard/summary`
+**Role owner/admin saja** (`403` untuk teknisi) — dipasang di route group yang
+sama dengan `POST /users` (`adminGroup` di `cmd/api/main.go`), modul
+`internal/dashboard` sendiri tidak menegakkan otorisasi apapun.
+
+Query opsional: `period_from`, `period_to` (`YYYY-MM-DD`). Kalau salah
+satu/keduanya tidak diisi, **masing-masing** default ke awal/akhir bulan
+kalender berjalan secara independen — bukan "kalau salah satu diisi, yang
+lain ikut menyesuaikan". Kalau cuma `period_from` yang dikirim, `period_to`
+tetap jatuh ke akhir bulan berjalan (bisa menghasilkan rentang yang jauh
+lebih panjang dari yang mungkin dimaksud client) — sengaja didokumentasikan
+di sini karena ini bukan perilaku yang jelas dari nama parameternya saja.
+`period_from` setelah `period_to` → `400 VALIDATION_ERROR`.
+
+Response `200`:
+```json
+{
+  "financial": {
+    "period": { "from": "2026-08-01T00:00:00Z", "to": "2026-08-31T00:00:00Z" },
+    "invoiced_total": 4300000, "received_total": 2400000, "outstanding_total": 2000000,
+    "by_status": {
+      "draft": { "count": 1, "total": 500000 },
+      "sent": { "count": 1, "total": 1000000 },
+      "paid": { "count": 1, "total": 2000000 },
+      "overdue": { "count": 0, "total": 0 },
+      "cancelled": { "count": 1, "total": 800000 }
+    }
+  },
+  "jobs": {
+    "by_status": { "requested": 3, "scheduled": 1, "in_progress": 1, "completed": 6, "cancelled": 1 },
+    "upcoming_7_days": [ { "id": "uuid", "job_code": "JOB-2026-0001", "customer_name": "Bengkel A", "scheduled_date": "2026-08-06T00:00:00Z" } ],
+    "overdue_scheduled": [ { "id": "uuid", "job_code": "JOB-2026-0002", "customer_name": "Pabrik B", "scheduled_date": "2026-08-01T00:00:00Z" } ]
+  }
+}
+```
+
+**Keputusan/interpretasi yang perlu diketahui frontend:**
+- `invoiced_total`/`by_status` dihitung dari `invoices.created_at` **TANPA filter status** — invoice `cancelled` yang dibuat di dalam period tetap ikut ke `invoiced_total` (literal sesuai kontrak: "SUM(invoices.total) WHERE created_at dalam period", bukan "SUM invoice yang masih berlaku"). Kalau frontend butuh angka "invoiced tapi bukan yang dibatalkan", itu perlu dihitung sendiri dari `by_status` (total dikurangi `by_status.cancelled.total`), bukan dari `invoiced_total` langsung.
+- `outstanding_total` **TIDAK dibatasi period** (posisi saldo sekarang, bukan arus kas periode) dan **bisa negatif** kalau ada invoice yang di-PATCH manual balik ke status `sent`/`overdue` setelah sempat lunas (lihat Catatan Desain #6 soal `PATCH /invoices/{id}/status` tanpa state-machine) — sengaja tidak di-clamp ke 0.
+- `upcoming_7_days`: `scheduled_date` dari **hari ini sampai +7 hari, inklusif kedua ujung** (8 hari kalender, bukan 7).
+- `by_status` financial/jobs SELALU berisi ke-5 key masing-masing walau count-nya 0 — bukan cuma status yang ada datanya.
+- `period.from`/`period.to` di response adalah representasi `time.Time` biasa (RFC3339 midnight UTC), konsisten dengan bagaimana field tanggal-saja lain (mis. `due_date` invoice) sudah diserialize di codebase ini — BUKAN string `YYYY-MM-DD` polos.
+
+**Transaction boundary** (Atomicity/Consistency, didiskusikan eksplisit sesuai
+CLAUDE.md): SATU transaksi **REPEATABLE READ, READ ONLY** membungkus SEMUA
+query di endpoint ini (financial + jobs) — lihat penjelasan lengkap kenapa
+Read Committed (default) tidak cukup di `internal/dashboard/repository.go`
+(`GetSummary`) dan di laporan PR. Endpoint CRUD lain di project ini
+sengaja TETAP Read Committed - kebutuhannya berbeda.
+
+---
+
 ## Catatan Desain & Keputusan Teknis Kunci
 
 1. **Kenapa `job_status_history` wajib ada?** Audit trail — siapa ubah status apa, kapan. Ini jawaban langsung untuk masalah awal "sering loss informasi". **(Ditemukan hilang dari implementasi saat audit 2026-07-30, wajib dikembalikan.)**
@@ -195,6 +252,7 @@ Tidak ada endpoint HTTP publik untuk modul ini saat ini — murni internal, dipi
 4. **Kenapa `PATCH /jobs/{id}/assign` pakai optimistic locking, bukan pessimistic seperti di payment?** Kasusnya beda: di payment, kita *mau* request kedua menunggu lalu diproses berurutan (uang tetap harus tercatat semua). Di assign, kita *mau* request kedua **ditolak dan diberi tahu ada konflik** (bukan cuma mengantre lalu diam-diam menimpa) — supaya admin kedua sadar perlu re-check kondisi terbaru sebelum assign ulang.
 5. **Kenapa notifikasi "fire-and-forget"?** Karena notifikasi itu pendukung, bukan sumber kebenaran finansial — kalau email gagal terkirim, itu tidak boleh membatalkan invoice yang sudah sah dibuat. Beda prinsip dengan transaksi finansial yang harus atomic.
 6. **`PATCH /invoices/{id}/status` TIDAK punya state-machine/transition guard** — diverifikasi langsung terhadap implementasi (`internal/invoice/service.go` `UpdateStatus`, `internal/invoice/domain.go` `Status.Valid()`) dan constraint database (`invoices_status_check`, lihat migration `000014`), keduanya cuma memvalidasi "apakah salah satu dari 5 nilai enum", bukan "apakah transisi dari status saat ini valid". Dibuktikan lewat request nyata terhadap server berjalan: `draft → paid` (skip `sent`), `paid → draft` (mundur), dan `cancelled → sent` (membangkitkan invoice yang sudah dibatalkan) semuanya diterima `200`. **Konsekuensi untuk frontend**: pembatasan opsi manual (mis. cuma menyediakan tombol "Tandai Terkirim"/"Batalkan" di UI) murni tanggung jawab frontend — backend tidak menegakkan apa-apa di luar keanggotaan enum. Kalau nanti butuh state-machine sungguhan, itu perubahan desain baru, bukan bug fix (tidak ada regresi di sini — perilaku ini konsisten sejak `PATCH /invoices/{id}/status` pertama dibuat).
+7. **Kenapa `GET /dashboard/summary` pakai isolation level REPEATABLE READ (read-only), bukan Read Committed (default)?** Endpoint ini menjalankan banyak SELECT terpisah (invoiced_total, received_total, outstanding_total, by_status invoice, by_status job, upcoming/overdue job) yang harus tampil sebagai SATU snapshot koheren ke manusia yang melihat dashboard-nya. Read Committed memberi tiap statement snapshot-nya sendiri-sendiri (diambil saat statement itu mulai) - kalau ada write lain (mis. RecordPayment) commit di tengah rangkaian SELECT ini, angka-angka yang tampil di satu response bisa "berasal dari titik waktu berbeda" walau masing-masing individually benar saat dibaca. REPEATABLE READ mengunci SATU snapshot di query pertama transaksi, dipakai seluruh query berikutnya di transaksi yang sama. TIDAK butuh retry logic untuk error `40001` (serialization failure) karena transaksinya read-only (`AccessMode: ReadOnly`) - error itu cuma muncul dari write-write conflict, yang mustahil terjadi di transaksi yang tidak pernah menulis apapun. Lihat `internal/dashboard/repository.go` (`GetSummary`) untuk penjelasan lengkap dan `internal/dashboard/integration_test.go` (`TestGetSummary_RepeatableRead_DoesNotSeeConcurrentCommit`) untuk bukti otomatis (testcontainers-go, Postgres asli) bahwa jaminan ini benar-benar berlaku, bukan cuma asumsi dari nama flag `TxOptions`.
 
 ---
 
