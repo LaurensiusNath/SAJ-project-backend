@@ -14,7 +14,8 @@ DELETE FROM job_costs WHERE id = $1 AND job_id = $2;
 -- itu untuk meta.total_selling/total_margin di GET /jobs/{id}/costs, beda
 -- kebutuhan). subtotal_all = dasar PPN (semua cost_type). dpp_pph23 = dasar
 -- PPh 23, HANYA cost_type jasa (labor, transport) - spare_part sengaja
--- dikecualikan sesuai aturan pajak (lihat api-contract.md Catatan Desain #2).
+-- dikecualikan sesuai aturan pajak (lihat api-contract.md Catatan Desain &
+-- Keputusan Teknis Kunci: "Kenapa `spare_part` dikecualikan dari dasar PPh 23?").
 SELECT
     COALESCE(SUM(subtotal), 0)::numeric AS subtotal_all,
     COALESCE(SUM(subtotal) FILTER (WHERE cost_type IN ('labor', 'transport')), 0)::numeric AS dpp_pph23

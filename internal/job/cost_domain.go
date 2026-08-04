@@ -82,8 +82,8 @@ type CostTotals struct {
 // sengaja dipisah, bukan dipakai bersama:
 //   - SubtotalAll: dasar PPN, SUM semua cost_type.
 //   - DPPPPh23: dasar PPh 23, SUM cost_type IN (labor, transport) saja -
-//     lihat api-contract.md Catatan Desain #2 untuk alasan spare_part
-//     dikecualikan.
+//     lihat api-contract.md Catatan Desain & Keputusan Teknis Kunci:
+//     "Kenapa `spare_part` dikecualikan dari dasar PPh 23?" untuk alasannya.
 type InvoiceCostTotals struct {
 	SubtotalAll decimal.Decimal
 	DPPPPh23    decimal.Decimal

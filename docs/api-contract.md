@@ -260,6 +260,9 @@ Floating point tidak presisi untuk perhitungan finansial (rounding error di paja
 ### Kenapa `subtotal` di `job_costs` jadi `GENERATED ALWAYS AS ... STORED` column di level database, bukan cuma dihitung di Go?
 Menjamin konsistensi di level data itu sendiri — bahkan kalau ada write langsung ke DB di luar aplikasi (migrasi data, query manual), subtotal tidak akan pernah nyasar dari `selling_price * quantity`.
 
+### Kenapa `spare_part` dikecualikan dari dasar PPh 23?
+PPh 23 adalah pajak yang dipotong atas jasa (fee/imbalan atas pekerjaan), bukan atas penjualan barang. Komponen `spare_part` di `job_costs` secara substansi adalah transaksi jual-beli barang (perusahaan beli dengan `purchase_price`, jual ke customer dengan markup di `selling_price`), bukan imbalan jasa, jadi tidak termasuk objek PPh 23 yang wajib dipotong customer. `labor` dan `transport` sebaliknya murni komponen jasa. Ini alasan `job_costs` sejak awal dipisah per `cost_type` — bukan cuma untuk margin reporting, tapi supaya `dpp_pph23` bisa dihitung tepat dari subset yang benar secara pajak.
+
 ### Kenapa `PATCH /jobs/{id}/assign` pakai optimistic locking, bukan pessimistic seperti di payment?
 Kasusnya beda: di payment, kita *mau* request kedua menunggu lalu diproses berurutan (uang tetap harus tercatat semua). Di assign, kita *mau* request kedua **ditolak dan diberi tahu ada konflik** (bukan cuma mengantre lalu diam-diam menimpa) — supaya admin kedua sadar perlu re-check kondisi terbaru sebelum assign ulang.
 
