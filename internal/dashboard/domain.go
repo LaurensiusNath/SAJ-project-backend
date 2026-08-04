@@ -44,8 +44,9 @@ type FinancialSummary struct {
 	// sent/overdue) - sengaja TIDAK dibatasi period, ini posisi sekarang,
 	// bukan arus kas periode. Bisa jadi angka negatif kalau ada invoice
 	// yang secara manual di-PATCH statusnya balik ke sent/overdue setelah
-	// terlanjur lunas (lihat docs/api-contract.md Catatan Desain #6 soal
-	// PATCH /invoices/{id}/status tanpa state-machine) - sengaja TIDAK
+	// terlanjur lunas (lihat docs/api-contract.md Catatan Desain & Keputusan
+	// Teknis Kunci: "PATCH /invoices/{id}/status tanpa state-machine/
+	// transition guard") - sengaja TIDAK
 	// di-clamp ke 0, angka negatif di sini justru sinyal berguna kalau itu
 	// terjadi, bukan sesuatu yang perlu disembunyikan.
 	OutstandingTotal decimal.Decimal `json:"outstanding_total"`

@@ -90,23 +90,33 @@ jelaskan konsekuensinya sebelum jalan.
   cek pakai `EXPLAIN ANALYZE` dan jelaskan cara bacanya — jangan cuma
   langsung optimasi diam-diam
 
-> **Catatan environment, ditemukan saat modul Dashboard (PR #16)**: di
-> environment development ini, Go toolchain cuma ter-install di Windows
-> native, sementara Docker cuma ter-install di dalam WSL2 (bukan Docker
-> Desktop dengan integrasi Windows — tidak ada port-forwarding otomatis
-> dari WSL2 ke `localhost` Windows). Akibatnya `go test -tags=integration
-> ./...` (testcontainers-go) **gagal total kalau dijalankan dari shell
-> Windows native** — errornya `open //./pipe/docker_engine: The system
-> cannot find the file specified` — karena testcontainers-go butuh bicara
-> langsung ke Docker Engine lewat socket, bukan lewat port TCP yang
-> dipetakan (beda dari sekadar `docker compose up` yang portnya bisa
-> diakses lintas WSL2↔Windows via IP WSL2, lihat catatan verifikasi
-> live). Solusi yang terbukti jalan: install Go portable di **dalam**
-> WSL2 (extract tarball ke `$HOME`, tanpa perlu root/apt, `GOPATH`/
-> `GOCACHE` diarahkan ke folder terpisah supaya tidak bentrok dengan
-> `GOROOT`), lalu jalankan `go test -tags=integration ./...` dari sana —
-> bukan cuma `docker` command yang perlu di-routing lewat WSL2, seluruh
-> proses `go test`-nya juga harus.
+> **Catatan environment (Windows + WSL2)**: di environment development ini,
+> Go toolchain cuma ter-install di Windows native, sementara Docker cuma
+> ter-install di dalam WSL2 (bukan Docker Desktop dengan integrasi Windows —
+> tidak ada port-forwarding otomatis dari WSL2 ke `localhost` Windows). Dua
+> konsekuensi terpisah dari ini, jangan disamakan:
+>
+> 1. **Command `docker` biasa** (`docker ps`, `docker compose up`, dst) tidak
+>    bisa dijalankan langsung dari Git Bash/MSYS di Windows native — shell itu
+>    tidak bisa lihat Docker Engine yang jalan di WSL2 sama sekali. Harus
+>    di-routing lewat `wsl -d Ubuntu -- docker ...`. Port yang di-publish
+>    compose (mis. Postgres/Redis) tetap bisa diakses dari Windows native
+>    lewat IP WSL2 (`wsl hostname -I`), bukan `localhost` — lihat catatan
+>    verifikasi live.
+> 2. **Proses apapun yang butuh akses Docker Engine secara programatik**
+>    (bukan cuma command `docker` eksplisit) juga kena masalah yang sama,
+>    tapi solusinya BEDA dari poin 1 — routing command saja tidak cukup.
+>    Ditemukan saat modul Dashboard (PR #16): `testcontainers-go` (dipanggil
+>    dari `go test -tags=integration ./...`) bicara langsung ke Docker
+>    Engine lewat unix socket, bukan lewat port TCP yang dipetakan seperti
+>    `docker compose`. Windows-native `go test` gagal total — errornya
+>    `open //./pipe/docker_engine: The system cannot find the file
+>    specified`. Solusi yang terbukti jalan: install Go toolchain portable
+>    di **dalam** WSL2 (extract tarball ke `$HOME`, tanpa perlu root/apt,
+>    `GOPATH`/`GOCACHE` diarahkan ke folder terpisah supaya tidak bentrok
+>    dengan `GOROOT`), lalu jalankan `go test -tags=integration ./...` dari
+>    SANA — proses `go test` itu sendiri harus jalan dari dalam WSL2, bukan
+>    cuma dipanggil lewat `wsl -d Ubuntu -- ...` dari luar.
 
 ### 4. Arsitektur — modular monolith dulu, microservice belakangan
 - Ikuti struktur Clean Architecture yang sudah ada: `internal/<domain>/domain.go`,
