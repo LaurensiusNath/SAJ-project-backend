@@ -151,8 +151,17 @@ func TestGetSummary_AggregatesAcrossCustomersJobsInvoicesPayments(t *testing.T) 
 	require.NoError(t, err)
 
 	// --- financial ---
-	assert.True(t, summary.Financial.InvoicedTotal.Equal(decimal.NewFromInt(430)),
-		"invoiced_total: 100+200+80+50 in-period, 150 (inv3) excluded (created_at outside period) - got %s", summary.Financial.InvoicedTotal)
+	assert.True(t, summary.Financial.InvoicedTotal.Equal(decimal.NewFromInt(300)),
+		"invoiced_total: only sent (100) + paid (200) count - draft (50) and cancelled (80) are excluded even though in-period, overdue inv3 (150) excluded because it's outside the period - got %s", summary.Financial.InvoicedTotal)
+	// Property that must ALWAYS hold: invoiced_total is defined as
+	// sent+paid+overdue, so it must equal the sum of exactly those three
+	// by_status buckets - this is the regression guard asked for after the
+	// draft/cancelled inclusion bug, see also the dedicated
+	// TestGetSummary_InvoicedTotal_EqualsSentPlusPaidPlusOverdue below.
+	byStatus := summary.Financial.ByStatus
+	assert.True(t, summary.Financial.InvoicedTotal.Equal(byStatus.Sent.Total.Add(byStatus.Paid.Total).Add(byStatus.Overdue.Total)),
+		"invoiced_total (%s) must equal sent.total+paid.total+overdue.total (%s+%s+%s)",
+		summary.Financial.InvoicedTotal, byStatus.Sent.Total, byStatus.Paid.Total, byStatus.Overdue.Total)
 	assert.True(t, summary.Financial.ReceivedTotal.Equal(decimal.NewFromInt(40)),
 		"received_total: only the 40 payment is in-period, the 10 payment is outside period - got %s", summary.Financial.ReceivedTotal)
 	assert.True(t, summary.Financial.OutstandingTotal.Equal(decimal.NewFromInt(200)),
@@ -187,6 +196,55 @@ func TestGetSummary_AggregatesAcrossCustomersJobsInvoicesPayments(t *testing.T) 
 	assert.Equal(t, "Pabrik B", summary.Jobs.OverdueScheduled[0].CustomerName)
 }
 
+// TestGetSummary_InvoicedTotal_EqualsSentPlusPaidPlusOverdue is a dedicated
+// regression guard for a real bug caught in review: invoiced_total used to
+// sum ALL invoices in the period regardless of status, which silently
+// counted draft (not yet issued) and cancelled invoices as "invoiced". This
+// test seeds exactly one invoice per status in the SAME period and asserts
+// the property that must always hold: invoiced_total is defined as
+// sent+paid+overdue, nothing else - if this logic drifts again (e.g.
+// someone "simplifies" the WHERE clause back to no status filter), this
+// test fails immediately instead of relying on someone noticing the
+// discrepancy against by_status by eye.
+func TestGetSummary_InvoicedTotal_EqualsSentPlusPaidPlusOverdue(t *testing.T) {
+	pool := testhelper.NewPostgresPool(t)
+	ctx := context.Background()
+	queries := sqlcgen.New(pool)
+
+	custRepo := customer.NewRepository(queries)
+	cust, err := custRepo.Create(ctx, customer.Customer{Name: "Invoiced Total Test Co", CustomerType: customer.CustomerTypePerorangan})
+	require.NoError(t, err)
+	jobRepo := job.NewRepository(pool, queries)
+
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	statuses := []struct {
+		status string
+		total  int64
+	}{
+		{"draft", 10}, {"cancelled", 20}, {"sent", 30}, {"paid", 40}, {"overdue", 50},
+	}
+	for _, s := range statuses {
+		j, err := jobRepo.Create(ctx, job.Job{CustomerID: cust.ID, Title: "carrier for " + s.status})
+		require.NoError(t, err)
+		insertInvoice(t, pool, j.ID, "INV-PROP-"+s.status, decimal.NewFromInt(s.total), s.status, today)
+	}
+
+	repo := dashboard.NewRepository(pool, queries)
+	summary, err := repo.GetSummary(ctx, dashboard.PeriodInput{
+		From: today.AddDate(0, 0, -1), To: today, ToExclusive: today.AddDate(0, 0, 1),
+	})
+	require.NoError(t, err)
+
+	byStatus := summary.Financial.ByStatus
+	expected := byStatus.Sent.Total.Add(byStatus.Paid.Total).Add(byStatus.Overdue.Total)
+	assert.True(t, summary.Financial.InvoicedTotal.Equal(expected),
+		"invoiced_total (%s) must equal sent+paid+overdue (%s) - got draft=%s cancelled=%s",
+		summary.Financial.InvoicedTotal, expected, byStatus.Draft.Total, byStatus.Cancelled.Total)
+	// Pinned concretely too, not just the property - 30+40+50, draft(10) and cancelled(20) excluded.
+	assert.True(t, summary.Financial.InvoicedTotal.Equal(decimal.NewFromInt(120)),
+		"got %s, want 120 (30 sent + 40 paid + 50 overdue, draft/cancelled excluded)", summary.Financial.InvoicedTotal)
+}
+
 // TestGetSummary_RepeatableRead_DoesNotSeeConcurrentCommit proves the exact
 // Postgres guarantee the report leans on: once this transaction's first
 // query establishes its snapshot, a write that COMMITS from a different
@@ -213,8 +271,11 @@ func TestGetSummary_RepeatableRead_DoesNotSeeConcurrentCommit(t *testing.T) {
 	jobB, err := jobRepo.Create(ctx, job.Job{CustomerID: cust.ID, Title: "carrier B"})
 	require.NoError(t, err)
 
+	// status "sent" (not "draft") - InvoicedTotal only counts
+	// sent/paid/overdue, this test needs a status that actually counts so
+	// the sanity check below is meaningful.
 	now := time.Now().UTC()
-	insertInvoice(t, pool, jobA.ID, "INV-SNAP-1", decimal.NewFromInt(100), "draft", now)
+	insertInvoice(t, pool, jobA.ID, "INV-SNAP-1", decimal.NewFromInt(100), "sent", now)
 
 	period := sqlcgen.InvoicedTotalParams{
 		PeriodFrom:        pgconv.ToTimestamptz(now.AddDate(0, 0, -1)),
@@ -234,7 +295,7 @@ func TestGetSummary_RepeatableRead_DoesNotSeeConcurrentCommit(t *testing.T) {
 	// tx above is still open - this is the "concurrent write" that a
 	// Read-Committed transaction WOULD see on its next statement, but a
 	// Repeatable Read transaction must not.
-	insertInvoice(t, pool, jobB.ID, "INV-SNAP-2", decimal.NewFromInt(500), "draft", now)
+	insertInvoice(t, pool, jobB.ID, "INV-SNAP-2", decimal.NewFromInt(500), "sent", now)
 
 	secondRead, err := txQueries.InvoicedTotal(ctx, period)
 	require.NoError(t, err)

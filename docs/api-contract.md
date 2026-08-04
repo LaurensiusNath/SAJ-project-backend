@@ -211,7 +211,7 @@ Response `200`:
 {
   "financial": {
     "period": { "from": "2026-08-01T00:00:00Z", "to": "2026-08-31T00:00:00Z" },
-    "invoiced_total": 4300000, "received_total": 2400000, "outstanding_total": 2000000,
+    "invoiced_total": 3000000, "received_total": 2400000, "outstanding_total": 2000000,
     "by_status": {
       "draft": { "count": 1, "total": 500000 },
       "sent": { "count": 1, "total": 1000000 },
@@ -229,7 +229,7 @@ Response `200`:
 ```
 
 **Keputusan/interpretasi yang perlu diketahui frontend:**
-- `invoiced_total`/`by_status` dihitung dari `invoices.created_at` **TANPA filter status** — invoice `cancelled` yang dibuat di dalam period tetap ikut ke `invoiced_total` (literal sesuai kontrak: "SUM(invoices.total) WHERE created_at dalam period", bukan "SUM invoice yang masih berlaku"). Kalau frontend butuh angka "invoiced tapi bukan yang dibatalkan", itu perlu dihitung sendiri dari `by_status` (total dikurangi `by_status.cancelled.total`), bukan dari `invoiced_total` langsung.
+- `invoiced_total` = SUM(`invoices.total`) WHERE `created_at` dalam period **DAN status IN (`sent`, `paid`, `overdue`)** — `draft` (belum benar-benar diterbitkan ke customer) dan `cancelled` (sudah dibatalkan) **sengaja tidak ikut terhitung**. Karena itu, `invoiced_total` **selalu** sama dengan `by_status.sent.total + by_status.paid.total + by_status.overdue.total` — kalau frontend butuh reproduksi angka ini secara independen (mis. untuk validasi UI), itu jaminan yang bisa diandalkan, bukan cuma kebetulan.
 - `outstanding_total` **TIDAK dibatasi period** (posisi saldo sekarang, bukan arus kas periode) dan **bisa negatif** kalau ada invoice yang di-PATCH manual balik ke status `sent`/`overdue` setelah sempat lunas (lihat Catatan Desain #6 soal `PATCH /invoices/{id}/status` tanpa state-machine) — sengaja tidak di-clamp ke 0.
 - `upcoming_7_days`: `scheduled_date` dari **hari ini sampai +7 hari, inklusif kedua ujung** (8 hari kalender, bukan 7).
 - `by_status` financial/jobs SELALU berisi ke-5 key masing-masing walau count-nya 0 — bukan cuma status yang ada datanya.

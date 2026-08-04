@@ -7,9 +7,18 @@
 -- period_from/period_to_exclusive: batas [from, to) - to_exclusive sudah
 -- "besok dari period_to yang diminta user" supaya seluruh hari terakhir
 -- period ikut ter-hitung (lihat Service untuk perhitungan tanggalnya).
+--
+-- status IN (sent, paid, overdue) - SENGAJA exclude draft dan cancelled.
+-- "invoiced" berarti sudah benar-benar diterbitkan ke customer (draft masih
+-- internal, belum tentu jadi) dan jelas bukan yang sudah dibatalkan. Angka
+-- ini HARUS selalu sama dengan
+-- (by_status.sent.total + by_status.paid.total + by_status.overdue.total)
+-- - lihat TestGetSummary_InvoicedTotal_EqualsSentPlusPaidPlusOverdue di
+-- integration_test.go, jaring pengaman kalau logic ini berubah lagi nanti.
 SELECT COALESCE(SUM(total), 0)::numeric AS total
 FROM invoices
-WHERE created_at >= sqlc.arg(period_from) AND created_at < sqlc.arg(period_to_exclusive);
+WHERE created_at >= sqlc.arg(period_from) AND created_at < sqlc.arg(period_to_exclusive)
+  AND status IN ('sent', 'paid', 'overdue');
 
 -- name: ReceivedTotal :one
 SELECT COALESCE(SUM(amount), 0)::numeric AS total
