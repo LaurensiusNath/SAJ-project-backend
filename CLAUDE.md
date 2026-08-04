@@ -90,6 +90,24 @@ jelaskan konsekuensinya sebelum jalan.
   cek pakai `EXPLAIN ANALYZE` dan jelaskan cara bacanya — jangan cuma
   langsung optimasi diam-diam
 
+> **Catatan environment, ditemukan saat modul Dashboard (PR #16)**: di
+> environment development ini, Go toolchain cuma ter-install di Windows
+> native, sementara Docker cuma ter-install di dalam WSL2 (bukan Docker
+> Desktop dengan integrasi Windows — tidak ada port-forwarding otomatis
+> dari WSL2 ke `localhost` Windows). Akibatnya `go test -tags=integration
+> ./...` (testcontainers-go) **gagal total kalau dijalankan dari shell
+> Windows native** — errornya `open //./pipe/docker_engine: The system
+> cannot find the file specified` — karena testcontainers-go butuh bicara
+> langsung ke Docker Engine lewat socket, bukan lewat port TCP yang
+> dipetakan (beda dari sekadar `docker compose up` yang portnya bisa
+> diakses lintas WSL2↔Windows via IP WSL2, lihat catatan verifikasi
+> live). Solusi yang terbukti jalan: install Go portable di **dalam**
+> WSL2 (extract tarball ke `$HOME`, tanpa perlu root/apt, `GOPATH`/
+> `GOCACHE` diarahkan ke folder terpisah supaya tidak bentrok dengan
+> `GOROOT`), lalu jalankan `go test -tags=integration ./...` dari sana —
+> bukan cuma `docker` command yang perlu di-routing lewat WSL2, seluruh
+> proses `go test`-nya juga harus.
+
 ### 4. Arsitektur — modular monolith dulu, microservice belakangan
 - Ikuti struktur Clean Architecture yang sudah ada: `internal/<domain>/domain.go`,
   `repository.go`, `service.go`, `handler.go`
