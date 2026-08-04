@@ -44,7 +44,7 @@ type FinancialSummary struct {
 	// sent/overdue) - sengaja TIDAK dibatasi period, ini posisi sekarang,
 	// bukan arus kas periode. Bisa jadi angka negatif kalau ada invoice
 	// yang secara manual di-PATCH statusnya balik ke sent/overdue setelah
-	// terlanjur lunas (lihat docs/api-contract.md Catatan Desain #6 soal
+	// terlanjur lunas (lihat docs/api-contract.md Catatan Desain #7 soal
 	// PATCH /invoices/{id}/status tanpa state-machine) - sengaja TIDAK
 	// di-clamp ke 0, angka negatif di sini justru sinyal berguna kalau itu
 	// terjadi, bukan sesuatu yang perlu disembunyikan.
