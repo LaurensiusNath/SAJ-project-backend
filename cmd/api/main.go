@@ -13,6 +13,7 @@ import (
 	"github.com/nathan/cnc-pm-backend/internal/auth"
 	"github.com/nathan/cnc-pm-backend/internal/config"
 	"github.com/nathan/cnc-pm-backend/internal/customer"
+	"github.com/nathan/cnc-pm-backend/internal/dashboard"
 	"github.com/nathan/cnc-pm-backend/internal/invoice"
 	"github.com/nathan/cnc-pm-backend/internal/job"
 	"github.com/nathan/cnc-pm-backend/internal/notification"
@@ -134,6 +135,16 @@ func main() {
 	invoiceService := invoice.NewService(invoiceRepo)
 	invoiceHandler := invoice.NewHandler(invoiceService)
 	invoiceHandler.RegisterRoutes(protectedGroup)
+
+	// dashboard.NewRepository butuh dbPool (bukan cuma queries) -
+	// GetSummary membuka transaksi REPEATABLE READ read-only sendiri (lihat
+	// internal/dashboard/repository.go). Route-nya dipasang di adminGroup
+	// yang SUDAH ada (dipakai user.Handler) - owner/admin saja, sama
+	// persis kebutuhan kontrak (403 untuk teknisi), tanpa perlu grup baru.
+	dashboardRepo := dashboard.NewRepository(dbPool, queries)
+	dashboardService := dashboard.NewService(dashboardRepo)
+	dashboardHandler := dashboard.NewHandler(dashboardService)
+	dashboardHandler.RegisterRoutes(adminGroup)
 
 	// Reminder scheduled_date DAN auto-transition invoice overdue jalan di
 	// goroutine terpisah lewat ticker yang SAMA (bukan dua infrastruktur
