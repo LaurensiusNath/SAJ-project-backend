@@ -1,0 +1,17 @@
+-- Ditambahkan untuk GET /dashboard/summary (upcoming_7_days/overdue_scheduled,
+-- lihat internal/dashboard) - dua-duanya filter jobs.scheduled_date, kolom
+-- yang sebelumnya tidak punya index sama sekali (cuma customer_id/
+-- technician_id/status yang ter-index, lihat migration 000004).
+--
+-- Diputuskan lewat EXPLAIN ANALYZE (bukan tebakan) terhadap 20.000 baris
+-- jobs sintetis:
+--   - upcoming_7_days (rentang scheduled_date SANGAT selektif, ~1-2% baris)
+--     turun dari 4.66ms jadi 1.35ms pakai index ini - jelas untung.
+--   - overdue_scheduled (predikat "< CURRENT_DATE" TIDAK selektif, ~50%
+--     baris) nyaris tidak berubah (malah sedikit lebih lambat, dalam noise)
+--     - index tidak menolong di sini, planner tetap akan pilih Seq Scan
+--     kalau baris yang cocok terlalu banyak.
+-- Tetap ditambahkan karena query lain di tabel yang sama diuntungkan
+-- signifikan, dan overhead tulis index ini kecil (jobs bukan tabel
+-- high-write untuk skala satu bengkel CNC).
+CREATE INDEX idx_jobs_scheduled_date ON jobs (scheduled_date);
