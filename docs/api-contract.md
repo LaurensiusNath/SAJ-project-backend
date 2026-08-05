@@ -314,4 +314,4 @@ Field terdampak: `jobs.scheduled_date`, `jobs.completed_date`, `invoices.due_dat
 
 | Item | PR |
 |---|---|
-| Field bertipe tanggal serialize sebagai RFC3339 penuh, bukan `YYYY-MM-DD` | *(diisi setelah PR dibuka — lihat commit `fix(dateonly)`)* |
+| Field bertipe tanggal serialize sebagai RFC3339 penuh, bukan `YYYY-MM-DD` | [#20](https://github.com/LaurensiusNath/SAJ-project-backend/pull/20) |
