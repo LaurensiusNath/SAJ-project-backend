@@ -244,6 +244,83 @@ sengaja TETAP Read Committed - kebutuhannya berbeda.
 
 ---
 
+## 7. Modul Tax Report (Laporan Pajak)
+
+Modul satelit kedua yang murni agregat (setelah Dashboard), untuk halaman
+"Laporan Pajak" di frontend — membantu pemilik bisnis mengumpulkan invoice
+PPN keluaran dan estimasi bukti potong PPh 23 saat lapor pajak bulanan
+(SPT Masa PPN).
+
+### `GET /reports/tax-summary`
+**Role owner/admin saja** (`403` untuk teknisi) — dipasang di `adminGroup`
+yang sama dengan `GET /dashboard/summary`, modul `internal/taxreport`
+sendiri tidak menegakkan otorisasi apapun.
+
+Query opsional: `period_from`, `period_to` (`YYYY-MM-DD`). Default dan
+validasi **identik** dengan `GET /dashboard/summary` (masing-masing default
+awal/akhir bulan berjalan secara independen; `period_from` setelah
+`period_to` → `400 VALIDATION_ERROR`) — lihat Catatan Desain di bawah kenapa
+logic ini diduplikasi, bukan di-reuse dari modul Dashboard.
+
+Response `200`:
+```json
+{
+  "period": { "from": "2026-08-01", "to": "2026-08-31" },
+  "ppn": {
+    "total_ppn_keluaran": 220000,
+    "invoices": [
+      {
+        "id": "uuid", "invoice_number": "INV-2026-0001", "job_code": "JOB-2026-0001",
+        "customer_name": "PT Mitra Utama", "subtotal": 1000000, "tax_amount": 110000,
+        "nomor_faktur_pajak": "010.000-26.00000001"
+      }
+    ]
+  },
+  "pph23": {
+    "total_estimasi": 45000,
+    "payments": [
+      {
+        "id": "uuid", "invoice_id": "uuid", "invoice_number": "INV-2026-0001",
+        "customer_name": "PT Mitra Utama", "customer_type": "badan_usaha",
+        "payment_date": "2026-08-03T10:15:00Z", "pph23_share_estimasi": 12000,
+        "bukti_potong_pph23_ref": "BP-001"
+      }
+    ]
+  }
+}
+```
+
+**Keputusan/interpretasi yang perlu diketahui frontend:**
+- `ppn.invoices`: invoice dengan `created_at` dalam period **DAN status IN
+  (`sent`, `paid`, `overdue`)** — persis logic `invoiced_total` di Dashboard
+  (`draft`/`cancelled` dikecualikan). `total_ppn_keluaran` = SUM(`tax_amount`)
+  dari invoice-invoice ini, dihitung dari baris yang sama, jadi selalu
+  konsisten dengan daftar `invoices` yang ditampilkan.
+- `pph23.payments`: **SEMUA** payment dengan `created_at` dalam period,
+  **TIDAK difilter berdasarkan status invoice induknya** — asimetris dengan
+  `ppn.invoices` secara sengaja (payment terhadap invoice `draft` tetap
+  muncul di sini). Juga **TIDAK difilter** berdasarkan `customer_type` atau
+  `bukti_potong_pph23_ref` (null atau tidak) — `customer_type` diekspos apa
+  adanya supaya frontend/pengguna yang memutuskan (lihat Catatan Desain:
+  keputusan ini belum final).
+- `pph23_share_estimasi` per payment adalah alokasi **proporsional** dari
+  `pph23_estimated_amount` invoice terhadap seluruh payment invoice itu
+  (all-time, bukan cuma yang dalam period) — lihat Catatan Desain untuk rumus
+  dan alternatif yang dipertimbangkan lalu ditolak. `total_estimasi` = SUM
+  dari kolom ini, bukan query agregat terpisah.
+- `payment_date` **RFC3339 penuh** (`payments.created_at`), BUKAN
+  `YYYY-MM-DD` — beda dari `period.from`/`period.to` yang tetap date-only.
+  Field ini merepresentasikan momen (jam berapa pembayaran dicatat), bukan
+  tanggal murni seperti `scheduled_date`/`due_date`, jadi di luar cakupan
+  fix date-only-serialization sebelumnya.
+
+**Transaction boundary**: **TIDAK ada transaksi eksplisit** — kedua query
+(invoices, payments) jalan langsung lewat connection pool, Read Committed
+default. Ini SENGAJA berbeda dari Dashboard (yang wajib REPEATABLE READ) —
+lihat Catatan Desain di bawah untuk alasan lengkap.
+
+---
+
 ## Catatan Desain & Keputusan Teknis Kunci
 
 Urutan di bawah ini kronologis (kapan ditemukan/diputuskan), bukan alfabetis
@@ -285,6 +362,18 @@ Field terdampak: `jobs.scheduled_date`, `jobs.completed_date`, `invoices.due_dat
 
 **Request DTO (`createJobRequest.ScheduledDate`, `createInvoiceRequest.DueDate`) SENGAJA TIDAK diikutkan** — sisi input sudah benar sejak awal (`*string` + `time.Parse` manual, bukan lewat `encoding/json` unmarshal `time.Time`), jadi tidak ada bug untuk diperbaiki di situ. Konsekuensinya: fungsi `parseOptionalDate`+`dateLayout` yang terduplikasi 3x (`internal/job/handler.go`, `internal/invoice/handler.go`, `internal/dashboard/handler.go`) TETAP ada, cuma tipe balik `parseOptionalDate` yang berubah supaya nyambung ke domain type baru — lihat item Technical Debt terpisah soal ini.
 
+### Konfirmasi: PPh 23 sudah benar tidak dipotong untuk customer `perorangan` — 2026-08-05
+Ditemukan lewat investigasi wajib saat membangun `GET /reports/tax-summary` (bukan bug yang diperbaiki di sini — murni temuan konfirmasi). `ComputeAmounts` (`internal/invoice/domain.go`) sudah menghitung `dpp_pph23`/`pph23_estimated_amount` bergantung `customer_type`: kalau `perorangan`, keduanya di-nolkan; kalau `badan_usaha`, dihitung normal dari `labor`+`transport`. Ini sesuai aturan pajak sebenarnya — PPh 23 dipotong pemberi kerja/badan usaha, bukan orang pribadi. Dibuktikan lewat kode (`internal/invoice/repository.go` baris pemanggilan `ComputeAmounts`) DAN test unit yang sudah ada sebelumnya (`TestComputeAmounts_PeroranganCustomerSkipsPPh23` di `internal/invoice/domain_test.go`) — bukan sesuatu yang baru ditambahkan untuk PR ini. Dicatat di sini supaya tidak perlu diinvestigasi ulang di masa depan.
+
+### `GET /reports/tax-summary`: kenapa `resolvePeriod` diduplikasi lagi dari Dashboard, bukan diekstrak ke package bersama? — 2026-08-05
+Dua alasan: (1) loose coupling antar modul bisnis — `dashboard` dan `taxreport` adalah dua modul satelit sejajar, meng-import salah satu dari yang lain cuma untuk satu fungsi kecil melanggar prinsip "modul bisnis tidak saling import langsung antar domain" yang sudah dipegang project ini; (2) konsisten dengan preseden yang sudah diambil project ini untuk kasus persis sama — `parseOptionalDate`+`dateLayout` sudah terduplikasi 3x (job, invoice, dashboard — lihat Technical Debt #10) dan sengaja dibiarkan, bukan diekstrak, supaya tiap PR fitur tetap scoped. Ini sekarang jadi duplikasi ke-2 untuk pola "resolve period dari query param" (dashboard + taxreport) — kalau nanti ada modul KETIGA yang butuh pola sama, itu titik yang tepat untuk benar-benar diekstrak ke package baru (mis. `internal/period`), dicatat sebagai Technical Debt #11.
+
+### Kenapa `GET /reports/tax-summary` pakai Read Committed (default), bukan REPEATABLE READ seperti Dashboard? — 2026-08-05
+Berbeda dari Dashboard (yang WAJIB REPEATABLE READ, lihat item di atas), endpoint ini tidak butuh jaminan cross-query: `total_ppn_keluaran` dan `total_estimasi` masing-masing dihitung Go-side dari HASIL query-nya sendiri (bukan query terpisah) — konsisten by construction karena satu statement SQL di Postgres selalu punya snapshot MVCC konsisten sendiri, berlaku di isolation level manapun, bukan cuma REPEATABLE READ. Dan `ppn` (invoice yang diterbitkan) dengan `pph23` (payment yang diterima) adalah dua kategori pajak yang secara substansi berbeda — tidak pernah diharapkan saling cross-foot/rekonsiliasi angka satu sama lain, beda dari Dashboard yang semua angkanya memang dimaksudkan merepresentasikan satu momen yang sama. Konsekuensi: `taxreport.NewRepository` cukup `*sqlcgen.Queries`, tidak butuh `*pgxpool.Pool` sama sekali (tidak ada `pgx.BeginFunc`). Lihat `internal/taxreport/repository.go` (`GetSummary`) untuk penjelasan lengkap.
+
+### Alokasi `pph23_share_estimasi` per payment: proporsional, bukan ditumpuk di payment pertama atau diulang penuh — 2026-08-05
+Rumus: `share = pph23_estimated_amount invoice × (payment.amount / total semua payment invoice itu, all-time)`, dibulatkan 2 desimal. Dua alternatif lebih sederhana dipertimbangkan dan ditolak: (1) taruh seluruh `pph23_estimated_amount` di payment PERTAMA invoice, sisanya 0 — salah merepresentasikan kapan kewajiban potong itu timbul, karena bukti potong PPh 23 di dunia nyata biasanya diterbitkan customer PER PEMBAYARAN yang mereka lakukan, proporsional ke jumlah saat itu; (2) tampilkan `pph23_estimated_amount` PENUH di SETIAP payment invoice itu — salah lebih parah, kalau frontend menjumlahkan kolom ini across payments akan double/triple-count. Proporsional adalah satu-satunya opsi di mana SUM(`pph23_share_estimasi`) seluruh payment satu invoice **persis sama** dengan `pph23_estimated_amount` invoice itu (dijamin matematis, modulo pembulatan kecil) — properti yang paling masuk akal untuk direkonsiliasi manual oleh akuntan. **Belum final**: filter berdasarkan `customer_type` (mis. sembunyikan payment dari customer `perorangan` yang share-nya selalu 0) sengaja TIDAK diterapkan di backend — `customer_type` diekspos mentah di tiap payment supaya frontend/pengguna yang memutuskan perlu ditampilkan atau tidak.
+
 ---
 
 ## Technical Debt / Prioritas Perbaikan (dari audit 2026-07-30)
@@ -301,6 +390,8 @@ Field terdampak: `jobs.scheduled_date`, `jobs.completed_date`, `invoices.due_dat
 | 8 | Provider WhatsApp pengganti Fonnte belum diputuskan | 🟢 Rendah, backlog |
 | 9 | HS256 vs RS256 untuk persiapan microservice extraction | 🟢 Rendah, backlog, revisit saat ekstraksi Notification Service |
 | 10 | Duplikasi `parseOptionalDate`+`dateLayout` di 3 handler (job, invoice, dashboard) — Opsi B dari investigasi date-serialization, sengaja ditunda demi jaga PR fix tetap scoped ke output-side saja | 🟢 Rendah, backlog |
+| 11 | Duplikasi `resolvePeriod` di 2 modul (dashboard, taxreport) — sama pola dengan #10, ekstrak ke `internal/period` kalau ada modul ketiga yang butuh pola sama | 🟢 Rendah, backlog |
+| 12 | `GET /reports/tax-summary` `pph23.payments`: keputusan apakah perlu filter/opsi filter berdasarkan `customer_type` di backend BELUM final — saat ini semua payment diekspos apa adanya, frontend yang memutuskan tampilannya | 🟢 Rendah, butuh keputusan produk |
 
 ## Selesai (di luar audit 2026-07-30)
 
