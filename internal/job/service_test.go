@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/nathan/cnc-pm-backend/internal/customer"
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 	"github.com/nathan/cnc-pm-backend/internal/notification"
 	"github.com/nathan/cnc-pm-backend/internal/user"
 )
@@ -194,7 +195,7 @@ func (f *fakeRepository) ListNeedingReminderCheck(_ context.Context) ([]Job, err
 	return result, nil
 }
 
-func (f *fakeRepository) UpdateStatus(_ context.Context, id uuid.UUID, status JobStatus, completedDate *time.Time, changedBy uuid.UUID, notes *string) (Job, error) {
+func (f *fakeRepository) UpdateStatus(_ context.Context, id uuid.UUID, status JobStatus, completedDate *dateonly.Date, changedBy uuid.UUID, notes *string) (Job, error) {
 	j, ok := f.jobs[id]
 	if !ok {
 		return Job{}, ErrNotFound

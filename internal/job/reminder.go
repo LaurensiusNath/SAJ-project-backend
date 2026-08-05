@@ -78,7 +78,7 @@ func reminderContent(j Job, today time.Time) (subject, body string) {
 	if j.ScheduledDate == nil {
 		return "", ""
 	}
-	scheduled := truncateToDate(*j.ScheduledDate)
+	scheduled := truncateToDate(j.ScheduledDate.Time)
 	todayDate := truncateToDate(today)
 	tomorrow := todayDate.AddDate(0, 0, 1)
 

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nathan/cnc-pm-backend/internal/customer"
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 	"github.com/nathan/cnc-pm-backend/internal/notification"
 	"github.com/nathan/cnc-pm-backend/internal/user"
 )
@@ -39,7 +40,7 @@ type CreateInput struct {
 	MachineID     *uuid.UUID
 	Title         string
 	Description   *string
-	ScheduledDate *time.Time
+	ScheduledDate *dateonly.Date
 }
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (Job, error) {
@@ -146,9 +147,9 @@ func (s *Service) UpdateStatus(ctx context.Context, id uuid.UUID, status JobStat
 		return Job{}, ErrInvalidStatus
 	}
 
-	var completedDate *time.Time
+	var completedDate *dateonly.Date
 	if status == StatusCompleted {
-		now := time.Now()
+		now := dateonly.FromTime(time.Now())
 		completedDate = &now
 	}
 

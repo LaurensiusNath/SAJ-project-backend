@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/shopspring/decimal"
+
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 )
 
 func ToText(s *string) pgtype.Text {
@@ -52,19 +54,25 @@ func FromNullableUUID(id pgtype.UUID) *uuid.UUID {
 	return &v
 }
 
-func ToDate(t *time.Time) pgtype.Date {
-	if t == nil {
+// ToDate/FromDate konversi ke/dari dateonly.Date (BUKAN time.Time telanjang)
+// - dateonly.Date sengaja punya Marshal/UnmarshalJSON sendiri ("YYYY-MM-DD"),
+// beda dari time.Time default (selalu RFC3339 penuh walau jamnya nol). Lihat
+// docs/api-contract.md Catatan Desain untuk root cause lengkap kenapa
+// pgconv.FromDate dulu mengembalikan *time.Time polos adalah sumber bug
+// serialisasi tanggal yang menyebar ke 3 modul.
+func ToDate(d *dateonly.Date) pgtype.Date {
+	if d == nil {
 		return pgtype.Date{}
 	}
-	return pgtype.Date{Time: *t, Valid: true}
+	return pgtype.Date{Time: d.Time, Valid: true}
 }
 
-func FromDate(t pgtype.Date) *time.Time {
+func FromDate(t pgtype.Date) *dateonly.Date {
 	if !t.Valid {
 		return nil
 	}
-	v := t.Time
-	return &v
+	d := dateonly.FromTime(t.Time)
+	return &d
 }
 
 // FromTimestamptz dipakai untuk kolom timestamptz yang NOT NULL (mis.

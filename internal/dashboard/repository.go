@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 	"github.com/nathan/cnc-pm-backend/internal/pgconv"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
 )
@@ -142,7 +143,7 @@ func (r *sqlcRepository) GetSummary(ctx context.Context, period PeriodInput) (Su
 
 		result = Summary{
 			Financial: FinancialSummary{
-				Period:        Period{From: period.From, To: period.To},
+				Period:        Period{From: dateonly.FromTime(period.From), To: dateonly.FromTime(period.To)},
 				InvoicedTotal: pgconv.FromNumeric(invoicedTotal),
 				ReceivedTotal: pgconv.FromNumeric(receivedTotal),
 				// Sub dilakukan di Go pakai shopspring/decimal (bukan

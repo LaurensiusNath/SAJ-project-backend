@@ -9,6 +9,8 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 )
 
 // fakeRepository di sini SENGAJA tidak mereplikasi logika transaksi/locking
@@ -134,7 +136,7 @@ func (f *fakeRepository) ListPayments(_ context.Context, invoiceID uuid.UUID) ([
 func (f *fakeRepository) MarkOverdue(_ context.Context) ([]Invoice, error) {
 	var overdue []Invoice
 	for id, inv := range f.invoices {
-		if inv.Status != StatusSent || inv.DueDate == nil || !inv.DueDate.Before(time.Now()) {
+		if inv.Status != StatusSent || inv.DueDate == nil || !inv.DueDate.Time.Before(time.Now()) {
 			continue
 		}
 		inv.Status = StatusOverdue
@@ -285,8 +287,8 @@ func TestService_MarkOverdue(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
 	ctx := context.Background()
-	yesterday := time.Now().AddDate(0, 0, -1)
-	tomorrow := time.Now().AddDate(0, 0, 1)
+	yesterday := dateonly.FromTime(time.Now().AddDate(0, 0, -1))
+	tomorrow := dateonly.FromTime(time.Now().AddDate(0, 0, 1))
 
 	overdueSent, err := svc.CreateFromJob(ctx, uuid.New(), CreateInput{DueDate: &yesterday})
 	require.NoError(t, err)
