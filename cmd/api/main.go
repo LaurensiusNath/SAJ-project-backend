@@ -19,6 +19,7 @@ import (
 	"github.com/nathan/cnc-pm-backend/internal/notification"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
 	"github.com/nathan/cnc-pm-backend/internal/settings"
+	"github.com/nathan/cnc-pm-backend/internal/taxreport"
 	"github.com/nathan/cnc-pm-backend/internal/user"
 )
 
@@ -145,6 +146,17 @@ func main() {
 	dashboardService := dashboard.NewService(dashboardRepo)
 	dashboardHandler := dashboard.NewHandler(dashboardService)
 	dashboardHandler.RegisterRoutes(adminGroup)
+
+	// taxreport.NewRepository CUMA butuh queries (bukan dbPool seperti
+	// dashboard) - GetSummary-nya sengaja TIDAK pakai transaksi eksplisit
+	// sama sekali (Read Committed default sudah cukup, lihat penjelasan
+	// lengkap di internal/taxreport/repository.go kenapa ini beda dari
+	// Dashboard walau sama-sama endpoint multi-query). Route-nya di
+	// adminGroup yang sama (owner/admin saja, 403 teknisi).
+	taxReportRepo := taxreport.NewRepository(queries)
+	taxReportService := taxreport.NewService(taxReportRepo)
+	taxReportHandler := taxreport.NewHandler(taxReportService)
+	taxReportHandler.RegisterRoutes(adminGroup)
 
 	// Reminder scheduled_date DAN auto-transition invoice overdue jalan di
 	// goroutine terpisah lewat ticker yang SAMA (bukan dua infrastruktur
