@@ -17,6 +17,7 @@ import (
 
 	"github.com/nathan/cnc-pm-backend/internal/customer"
 	"github.com/nathan/cnc-pm-backend/internal/dashboard"
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 	"github.com/nathan/cnc-pm-backend/internal/job"
 	"github.com/nathan/cnc-pm-backend/internal/pgconv"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
@@ -87,9 +88,9 @@ func TestGetSummary_AggregatesAcrossCustomersJobsInvoicesPayments(t *testing.T) 
 
 	jobRepo := job.NewRepository(pool, queries)
 	today := time.Now().UTC().Truncate(24 * time.Hour)
-	dateP := func(d int) *time.Time {
-		t := today.AddDate(0, 0, d)
-		return &t
+	dateP := func(d int) *dateonly.Date {
+		date := dateonly.FromTime(today.AddDate(0, 0, d))
+		return &date
 	}
 
 	// --- jobs untuk assertion by_status / upcoming / overdue ---
@@ -105,7 +106,7 @@ func TestGetSummary_AggregatesAcrossCustomersJobsInvoicesPayments(t *testing.T) 
 	require.NoError(t, err)
 	j4, err := jobRepo.Create(ctx, job.Job{CustomerID: custB.ID, Title: "J4 completed, past, must NOT be overdue", ScheduledDate: dateP(-5)})
 	require.NoError(t, err)
-	completedAt := today
+	completedAt := dateonly.FromTime(today)
 	_, err = jobRepo.UpdateStatus(ctx, j4.ID, job.StatusCompleted, &completedAt, tester.ID, nil)
 	require.NoError(t, err)
 	j5, err := jobRepo.Create(ctx, job.Job{CustomerID: custA.ID, Title: "J5 cancelled, future, must NOT be upcoming", ScheduledDate: dateP(1)})

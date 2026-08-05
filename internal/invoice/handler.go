@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 	"github.com/nathan/cnc-pm-backend/internal/httpresponse"
 )
 
@@ -226,7 +227,12 @@ func (h *Handler) ListPayments(c *gin.Context) {
 	httpresponse.Success(c, http.StatusOK, payments)
 }
 
-func parseOptionalDate(s *string) (*time.Time, error) {
+// parseOptionalDate TETAP menerima *string dan parsing manual pakai
+// time.Parse (BUKAN Opsi B dari investigasi date-serialization - request
+// DTO/binding sengaja tidak disentuh, lihat docs/api-contract.md backlog
+// soal duplikasi 3x fungsi ini). Yang berubah cuma tipe balik, supaya
+// nyambung ke CreateInput.DueDate yang sekarang *dateonly.Date.
+func parseOptionalDate(s *string) (*dateonly.Date, error) {
 	if s == nil || *s == "" {
 		return nil, nil
 	}
@@ -234,7 +240,8 @@ func parseOptionalDate(s *string) (*time.Time, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &t, nil
+	d := dateonly.FromTime(t)
+	return &d, nil
 }
 
 func (h *Handler) respondError(c *gin.Context, err error) {

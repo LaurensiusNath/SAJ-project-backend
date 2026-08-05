@@ -3,10 +3,11 @@ package invoice
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
+
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 )
 
 type Service struct {
@@ -24,7 +25,7 @@ func NewService(repo Repository) *Service {
 // company_settings.
 type CreateInput struct {
 	TaxPercentage *decimal.Decimal
-	DueDate       *time.Time
+	DueDate       *dateonly.Date
 }
 
 func (s *Service) CreateFromJob(ctx context.Context, jobID uuid.UUID, in CreateInput) (Invoice, error) {

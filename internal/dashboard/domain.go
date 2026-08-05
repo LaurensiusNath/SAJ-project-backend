@@ -2,10 +2,11 @@ package dashboard
 
 import (
 	"errors"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
+
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 )
 
 // ErrInvalidPeriod: period_from tidak boleh setelah period_to. Divalidasi di
@@ -23,9 +24,13 @@ type Summary struct {
 // Period selalu tanggal kalender INKLUSIF kedua ujung (From dan To
 // sama-sama termasuk) - lihat Service.resolvePeriod untuk bagaimana ini
 // diterjemahkan jadi batas query [From, To+1hari) di database.
+//
+// From/To dateonly.Date (VALUE, bukan pointer - field ini SELALU ada,
+// tidak pernah null, lihat Service.resolvePeriod yang selalu mengisi
+// default kalau client tidak mengirim period_from/period_to).
 type Period struct {
-	From time.Time `json:"from"`
-	To   time.Time `json:"to"`
+	From dateonly.Date `json:"from"`
+	To   dateonly.Date `json:"to"`
 }
 
 // InvoiceStatusAmount adalah satu baris breakdown financial.by_status.
@@ -93,8 +98,8 @@ type JobsByStatus struct {
 // query-nya sendiri menjamin baris yang dikembalikan selalu punya
 // scheduled_date terisi.
 type ScheduledJobRef struct {
-	ID            uuid.UUID  `json:"id"`
-	JobCode       string     `json:"job_code"`
-	CustomerName  string     `json:"customer_name"`
-	ScheduledDate *time.Time `json:"scheduled_date"`
+	ID            uuid.UUID      `json:"id"`
+	JobCode       string         `json:"job_code"`
+	CustomerName  string         `json:"customer_name"`
+	ScheduledDate *dateonly.Date `json:"scheduled_date"`
 }

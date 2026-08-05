@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/nathan/cnc-pm-backend/internal/customer"
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 	"github.com/nathan/cnc-pm-backend/internal/notification"
 )
 
@@ -39,7 +40,7 @@ func TestReminderContent_Classification(t *testing.T) {
 
 	testCases := []struct {
 		name          string
-		scheduledDate *time.Time
+		scheduledDate *dateonly.Date
 		wantSubject   string
 	}{
 		{name: "nil scheduled_date needs no reminder", scheduledDate: nil, wantSubject: ""},
@@ -78,7 +79,7 @@ func TestReminderContent_CrossTimezone_MatchesGmailWIBScenario(t *testing.T) {
 	today := time.Date(2026, 7, 30, 9, 0, 0, 0, wib)
 	// scheduled_date besok, tersimpan sebagai UTC tengah malam - persis
 	// seperti hasil parseOptionalDate/pgconv.ToDate untuk input "2026-07-31".
-	tomorrowUTC := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	tomorrowUTC := dateonly.New(2026, 7, 31)
 	j := Job{JobCode: "JOB-2026-0007", Title: "Servis Besok Test", ScheduledDate: &tomorrowUTC}
 
 	subject, _ := reminderContent(j, today)
@@ -86,9 +87,9 @@ func TestReminderContent_CrossTimezone_MatchesGmailWIBScenario(t *testing.T) {
 	assert.Equal(t, "Pengingat: Jadwal Servis Anda Besok", subject)
 }
 
-func ptrDate(y int, m time.Month, d int) *time.Time {
-	t := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
-	return &t
+func ptrDate(y int, m time.Month, d int) *dateonly.Date {
+	d2 := dateonly.New(y, m, d)
+	return &d2
 }
 
 func TestReminderService_CheckAndNotify(t *testing.T) {
@@ -107,7 +108,7 @@ func TestReminderService_CheckAndNotify(t *testing.T) {
 
 	tooFar, err := jobRepo.Create(ctx, Job{CustomerID: uuid.New(), Title: "Far future job", Status: StatusScheduled})
 	require.NoError(t, err)
-	future := time.Now().AddDate(0, 1, 0)
+	future := dateonly.FromTime(time.Now().AddDate(0, 1, 0))
 	tooFar.ScheduledDate = &future
 	jobRepo.jobs[tooFar.ID] = tooFar
 

@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
+
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 )
 
 type Status string
@@ -90,7 +92,7 @@ type Invoice struct {
 	PPh23EstimatedAmount decimal.Decimal `json:"pph23_estimated_amount"`
 	ExpectedReceivable   decimal.Decimal `json:"expected_receivable"`
 	Status               Status          `json:"status"`
-	DueDate              *time.Time      `json:"due_date"`
+	DueDate              *dateonly.Date  `json:"due_date"`
 	CreatedAt            time.Time       `json:"created_at"`
 	UpdatedAt            time.Time       `json:"updated_at"`
 }

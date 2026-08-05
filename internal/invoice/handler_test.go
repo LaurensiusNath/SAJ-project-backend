@@ -6,11 +6,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 )
 
 func newTestRouter() (*gin.Engine, *fakeRepository) {
@@ -71,4 +74,28 @@ func TestGetByJob_InvalidJobID(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestGetByJob_DueDate_SerializesAsDateOnly is the JSON-body-literal
+// regression guard for the date-serialization bug (docs/api-contract.md
+// Catatan Desain: "Kenapa field bertipe tanggal sekarang serialize sebagai
+// YYYY-MM-DD..."): invoices.due_date must appear as "YYYY-MM-DD" in the
+// ACTUAL marshaled HTTP response body - a Go-level *dateonly.Date/*time.Time
+// assertion (like TestService_MarkOverdue elsewhere in this package) can't
+// catch this class of bug, since it never inspects the JSON bytes.
+func TestGetByJob_DueDate_SerializesAsDateOnly(t *testing.T) {
+	router, repo := newTestRouter()
+	jobID := uuid.New()
+	dueDate := dateonly.New(2026, time.August, 15)
+	_, err := NewService(repo).CreateFromJob(context.Background(), jobID, CreateInput{DueDate: &dueDate})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+jobID.String()+"/invoice", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, `"due_date":"2026-08-15"`, "must be literal YYYY-MM-DD in the response body")
+	assert.NotContains(t, body, "T00:00:00Z", "must NOT be RFC3339 - this is exactly the regression this test guards against")
 }

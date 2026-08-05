@@ -15,6 +15,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/nathan/cnc-pm-backend/internal/customer"
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 	"github.com/nathan/cnc-pm-backend/internal/job"
 	"github.com/nathan/cnc-pm-backend/internal/notification"
 	"github.com/nathan/cnc-pm-backend/internal/pgconv"
@@ -38,7 +39,7 @@ type CreateFromJobInput struct {
 	// TaxPercentage nil berarti pakai company_settings.default_tax_percentage
 	// (lihat resolusinya di CreateFromJob).
 	TaxPercentage *decimal.Decimal
-	DueDate       *time.Time
+	DueDate       *dateonly.Date
 }
 
 type RecordPaymentInput struct {

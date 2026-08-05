@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 )
 
 // JobStatus merepresentasikan kolom jobs.status - pola typed-string enum
@@ -49,18 +51,18 @@ var (
 // JobCode sengaja tidak ada di CreateInput (lihat service.go) - di-generate
 // backend saat Create, sama seperti ID/CreatedAt, bukan input dari client.
 type Job struct {
-	ID            uuid.UUID  `json:"id"`
-	JobCode       string     `json:"job_code"`
-	CustomerID    uuid.UUID  `json:"customer_id"`
-	MachineID     *uuid.UUID `json:"machine_id"`
-	TechnicianID  *uuid.UUID `json:"technician_id"`
-	Title         string     `json:"title"`
-	Description   *string    `json:"description"`
-	Status        JobStatus  `json:"status"`
-	ScheduledDate *time.Time `json:"scheduled_date"`
-	CompletedDate *time.Time `json:"completed_date"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID            uuid.UUID      `json:"id"`
+	JobCode       string         `json:"job_code"`
+	CustomerID    uuid.UUID      `json:"customer_id"`
+	MachineID     *uuid.UUID     `json:"machine_id"`
+	TechnicianID  *uuid.UUID     `json:"technician_id"`
+	Title         string         `json:"title"`
+	Description   *string        `json:"description"`
+	Status        JobStatus      `json:"status"`
+	ScheduledDate *dateonly.Date `json:"scheduled_date"`
+	CompletedDate *dateonly.Date `json:"completed_date"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 }
 
 func (j Job) Validate() error {

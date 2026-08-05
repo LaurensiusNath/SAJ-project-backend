@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 	"github.com/nathan/cnc-pm-backend/internal/pgconv"
 	"github.com/nathan/cnc-pm-backend/internal/repository/sqlcgen"
 )
@@ -47,7 +48,7 @@ type Repository interface {
 	// dalam SATU transaksi (lihat badan fungsi) - changedBy datang dari JWT
 	// claim user yang login (dibaca handler.go lewat auth.UserIDFromContext),
 	// bukan dari body request.
-	UpdateStatus(ctx context.Context, id uuid.UUID, status JobStatus, completedDate *time.Time, changedBy uuid.UUID, notes *string) (Job, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, status JobStatus, completedDate *dateonly.Date, changedBy uuid.UUID, notes *string) (Job, error)
 	// ListStatusHistory dipakai Service.GetDetail untuk menyusun field
 	// status_history di response GET /jobs/{id}.
 	ListStatusHistory(ctx context.Context, jobID uuid.UUID) ([]JobStatusHistory, error)
@@ -152,7 +153,7 @@ func (r *sqlcRepository) Count(ctx context.Context, filter ListFilter) (int64, e
 // tercatat (atau sebaliknya), membuat audit trail tidak bisa dipercaya -
 // persis alasan yang sama dengan kenapa invoice.CreateFromJob dibungkus
 // transaksi (Atomicity).
-func (r *sqlcRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status JobStatus, completedDate *time.Time, changedBy uuid.UUID, notes *string) (Job, error) {
+func (r *sqlcRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status JobStatus, completedDate *dateonly.Date, changedBy uuid.UUID, notes *string) (Job, error) {
 	var result Job
 
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
