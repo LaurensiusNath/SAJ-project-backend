@@ -16,13 +16,22 @@ import (
 	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 )
 
+// noopRequireAdmin: pengganti requireAdmin sungguhan (auth.RequireRole) di
+// test package ini - package invoice sengaja tidak import internal/auth
+// (lihat main.go/settings.Handler soal role middleware disuntik dari luar),
+// jadi tidak ada middleware role nyata untuk dipasang di sini. Sama seperti
+// RequireAuth yang juga tidak dipasang di rg pada test ini, pengecekan
+// role/auth sungguhan adalah tanggung jawab main.go + internal/auth, bukan
+// package ini - test di sini fokus ke validasi & alur Service/Handler.
+func noopRequireAdmin(c *gin.Context) { c.Next() }
+
 func newTestRouter() (*gin.Engine, *fakeRepository) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
 	h := NewHandler(svc)
 	r := gin.New()
 	rg := r.Group("/api/v1")
-	h.RegisterRoutes(rg)
+	h.RegisterRoutes(rg, noopRequireAdmin)
 	return r, repo
 }
 

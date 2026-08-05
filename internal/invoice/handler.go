@@ -24,7 +24,12 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+// RegisterRoutes menerima requireAdmin terpisah dari rg - SEMUA endpoint di
+// modul ini kecuali PATCH bukti-potong-pph23 cukup RequireAuth biasa (sudah
+// dipasang di rg oleh main.go, terbuka untuk semua role login termasuk
+// teknisi), tapi PATCH bukti-potong-pph23 dibatasi owner/admin sesuai
+// api-contract.md - pola yang sama dengan settings.Handler.RegisterRoutes.
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, requireAdmin gin.HandlerFunc) {
 	rg.POST("/jobs/:id/invoice", h.CreateFromJob)
 	rg.GET("/jobs/:id/invoice", h.GetByJob)
 	rg.GET("/invoices", h.List)
@@ -33,6 +38,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.PATCH("/invoices/:id/status", h.UpdateStatus)
 	rg.POST("/invoices/:id/payments", h.RecordPayment)
 	rg.GET("/invoices/:id/payments", h.ListPayments)
+	rg.PATCH("/invoices/:id/payments/:payment_id/bukti-potong-pph23", requireAdmin, h.UpdatePaymentBuktiPotong)
 }
 
 type createInvoiceRequest struct {
@@ -212,6 +218,36 @@ func (h *Handler) RecordPayment(c *gin.Context) {
 	httpresponse.Success(c, http.StatusCreated, created)
 }
 
+type updatePaymentBuktiPotongRequest struct {
+	BuktiPotongPPh23Ref string `json:"bukti_potong_pph23_ref" binding:"required"`
+}
+
+func (h *Handler) UpdatePaymentBuktiPotong(c *gin.Context) {
+	invoiceID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid invoice id")
+		return
+	}
+	paymentID, err := uuid.Parse(c.Param("payment_id"))
+	if err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid payment id")
+		return
+	}
+
+	var req updatePaymentBuktiPotongRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		return
+	}
+
+	updated, err := h.svc.UpdatePaymentBuktiPotong(c.Request.Context(), invoiceID, paymentID, req.BuktiPotongPPh23Ref)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	httpresponse.Success(c, http.StatusOK, updated)
+}
+
 func (h *Handler) ListPayments(c *gin.Context) {
 	invoiceID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -246,7 +282,7 @@ func parseOptionalDate(s *string) (*dateonly.Date, error) {
 
 func (h *Handler) respondError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, ErrNotFound), errors.Is(err, ErrPaymentNotFound):
 		httpresponse.Error(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, ErrJobNotCompleted),
 		errors.Is(err, ErrAlreadyInvoiced),
@@ -255,7 +291,8 @@ func (h *Handler) respondError(c *gin.Context, err error) {
 		errors.Is(err, ErrInvalidFakturPajak),
 		errors.Is(err, ErrInvalidAmount),
 		errors.Is(err, ErrInvalidPaymentMethod),
-		errors.Is(err, ErrInvoiceNotPayable):
+		errors.Is(err, ErrInvoiceNotPayable),
+		errors.Is(err, ErrInvalidBuktiPotongRef):
 		httpresponse.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
 	default:
 		httpresponse.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")

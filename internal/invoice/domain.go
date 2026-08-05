@@ -69,6 +69,19 @@ var (
 	ErrInvalidAmount        = errors.New("amount must be greater than zero")
 	ErrInvalidPaymentMethod = errors.New("payment_method must be one of: transfer, cash, other")
 	ErrInvoiceNotPayable    = errors.New("payments can only be recorded against a draft or sent invoice")
+	// ErrPaymentNotFound: payment_id di path PATCH
+	// /invoices/{id}/payments/{payment_id}/bukti-potong-pph23 tidak
+	// ditemukan ATAU ditemukan tapi bukan milik invoice_id di path yang
+	// sama (lihat UpdatePaymentBuktiPotong query - WHERE id=$1 AND
+	// invoice_id=$2 sekaligus) - dua kasus ini sengaja dipetakan ke error
+	// yang sama (404), bukan dibedakan, karena dari sudut pandang client
+	// keduanya berarti "kombinasi invoice_id+payment_id ini tidak valid".
+	ErrPaymentNotFound = errors.New("payment not found")
+	// ErrInvalidBuktiPotongRef: sama pola dengan ErrInvalidFakturPajak -
+	// endpoint ini cuma untuk MENGISI referensi bukti potong (bukan
+	// menghapusnya), jadi string kosong ditolak di layer service sebelum
+	// sempat ke database.
+	ErrInvalidBuktiPotongRef = errors.New("bukti_potong_pph23_ref is required")
 )
 
 // Invoice adalah entity domain untuk satu invoice. Semua field angka

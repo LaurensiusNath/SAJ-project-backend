@@ -16,3 +16,13 @@ SELECT
     COUNT(*) FILTER (WHERE bukti_potong_pph23_ref IS NOT NULL) > 0 AS has_bukti_potong
 FROM payments
 WHERE invoice_id = $1;
+
+-- name: UpdatePaymentBuktiPotong :one
+-- WHERE menyertakan invoice_id (bukan cuma id) SENGAJA - memastikan
+-- payment_id di path benar-benar milik invoice_id di path yang sama
+-- (mencegah admin salah invoice_id/payment_id lolos begitu saja), bukan
+-- cuma soft-check di layer Go.
+UPDATE payments
+SET bukti_potong_pph23_ref = $3
+WHERE id = $1 AND invoice_id = $2
+RETURNING *;

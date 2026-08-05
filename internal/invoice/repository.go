@@ -72,6 +72,12 @@ type Repository interface {
 	// penjelasan lost update yang dicegah lock ini.
 	RecordPayment(ctx context.Context, in RecordPaymentInput) (Payment, error)
 	ListPayments(ctx context.Context, invoiceID uuid.UUID) ([]Payment, error)
+	// UpdatePaymentBuktiPotong mengisi/mengubah bukti_potong_pph23_ref pada
+	// payment yang SUDAH ADA, lalu (SAMA seperti RecordPayment) mengunci
+	// baris invoice dan mengevaluasi ulang apakah invoice sudah lunas -
+	// lihat badan fungsi untuk penjelasan lengkap kenapa ini WAJIB, bukan
+	// opsional.
+	UpdatePaymentBuktiPotong(ctx context.Context, invoiceID, paymentID uuid.UUID, buktiPotongRef string) (Payment, error)
 	// MarkOverdue menandai semua invoice 'sent' yang due_date-nya sudah
 	// lewat jadi 'overdue' - dipanggil periodik dari ticker yang sama
 	// dengan job.ReminderService (lihat cmd/api/main.go). Idempotent:
@@ -379,17 +385,7 @@ func (r *sqlcRepository) RecordPayment(ctx context.Context, in RecordPaymentInpu
 		if err != nil {
 			return fmt.Errorf("payment totals: %w", err)
 		}
-		totalPaid := pgconv.FromNumeric(totals.TotalPaid)
-
-		// api-contract.md: invoice lunas kalau SUM(payments.amount) + SUM
-		// pph23 yang tercatat via bukti potong >= total. pph23_estimated_amount
-		// cuma satu nilai per invoice (bukan per payment), jadi diterjemahkan
-		// sebagai: ditambahkan SEKALI kalau ADA payment yang mencatat
-		// bukti_potong_pph23_ref, bukan dijumlah berkali-kali per payment.
-		effectivePaid := totalPaid
-		if totals.HasBuktiPotong {
-			effectivePaid = effectivePaid.Add(inv.PPh23EstimatedAmount)
-		}
+		effectivePaid := computeEffectivePaid(pgconv.FromNumeric(totals.TotalPaid), inv.PPh23EstimatedAmount, totals.HasBuktiPotong)
 
 		if effectivePaid.GreaterThanOrEqual(inv.Total) {
 			if _, err := q.UpdateInvoiceStatus(ctx, sqlcgen.UpdateInvoiceStatusParams{
@@ -397,6 +393,106 @@ func (r *sqlcRepository) RecordPayment(ctx context.Context, in RecordPaymentInpu
 				Status: string(StatusPaid),
 			}); err != nil {
 				return fmt.Errorf("mark invoice paid: %w", err)
+			}
+		}
+
+		result = fromPaymentRow(paymentRow)
+		return nil
+	})
+	if err != nil {
+		return Payment{}, err
+	}
+	return result, nil
+}
+
+// computeEffectivePaid menerjemahkan aturan "lunas" di api-contract.md ke
+// satu tempat: SUM(payments.amount) + pph23_estimated_amount (SEKALI, bukan
+// per payment) kalau ADA payment yang mencatat bukti_potong_pph23_ref.
+// Dipakai baik oleh RecordPayment (payment baru) maupun
+// UpdatePaymentBuktiPotong (bukti potong susulan pada payment yang sudah
+// ada) - keduanya sama-sama bisa memicu transisi ke "paid", jadi logic
+// penentuannya HARUS identik, bukan diketik ulang dua kali dengan risiko
+// diam-diam melenceng.
+func computeEffectivePaid(totalPaid, pph23Estimated decimal.Decimal, hasBuktiPotong bool) decimal.Decimal {
+	if !hasBuktiPotong {
+		return totalPaid
+	}
+	return totalPaid.Add(pph23Estimated)
+}
+
+// UpdatePaymentBuktiPotong menjawab gap: bukti_potong_pph23_ref sebelumnya
+// CUMA bisa diisi saat payment dibuat (RecordPayment) - padahal bukti fisik
+// dari customer sering datang belakangan. Mengisinya belakangan BUKAN
+// operasi netral: bisa mengubah hasil computeEffectivePaid persis seperti
+// RecordPayment (lihat komentar di sana) - kalau payment ini yang PERTAMA
+// kali membuat has_bukti_potong jadi true untuk invoice ini, effectivePaid
+// bisa naik melewati inv.Total walau totalPaid (uang yang benar-benar
+// diterima) sama sekali tidak berubah.
+//
+// Konsekuensinya: fungsi ini WAJIB mengunci baris invoice yang SAMA
+// (GetInvoiceForUpdate) dan mengevaluasi ulang status dengan cara yang SAMA
+// PERSIS seperti RecordPayment - kalau tidak, dua request yang masuk
+// nyaris bersamaan (mis. PATCH bukti-potong di sini bersamaan dengan
+// POST payment baru lewat RecordPayment) bisa sama-sama menghitung
+// SUM(payments)/has_bukti_potong dari data yang sudah stale begitu salah
+// satunya commit duluan - lost update yang sama persis dengan yang dicegah
+// row lock di RecordPayment, cuma pemicunya beda (bukan uang baru masuk,
+// tapi metadata pajak yang berubah).
+//
+// SENGAJA TIDAK menggerbang siapa yang boleh dipanggil berdasarkan
+// inv.Status di awal (beda dari RecordPayment yang menolak invoice selain
+// draft/sent lewat ErrInvoiceNotPayable) - endpoint ini cuma mengoreksi
+// data historis (dokumen bukti potong), bukan menerima uang baru, jadi
+// tetap boleh dipanggil untuk invoice status apapun (termasuk overdue -
+// justru salah satu skenario nyata yang memicu fitur ini: bukti potong
+// yang telat datang, invoice sudah keburu overdue). Yang DIBATASI hanya
+// APAKAH boleh otomatis pindah ke "paid": hanya kalau status saat ini
+// draft/sent/overdue (baris masih "berutang" secara aktif) - SENGAJA
+// TIDAK termasuk cancelled (keputusan bisnis membatalkan invoice tidak
+// boleh diam-diam ditimpa cuma karena dokumen pajak menyusul) maupun paid
+// (sudah tercapai, mengulang UPDATE yang sama tidak perlu).
+func (r *sqlcRepository) UpdatePaymentBuktiPotong(ctx context.Context, invoiceID, paymentID uuid.UUID, buktiPotongRef string) (Payment, error) {
+	var result Payment
+
+	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		q := r.q.WithTx(tx)
+
+		invRow, err := q.GetInvoiceForUpdate(ctx, pgconv.ToUUID(invoiceID))
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("lock invoice row: %w", err)
+		}
+		inv := fromInvoiceRow(invRow)
+
+		paymentRow, err := q.UpdatePaymentBuktiPotong(ctx, sqlcgen.UpdatePaymentBuktiPotongParams{
+			ID:                  pgconv.ToUUID(paymentID),
+			InvoiceID:           pgconv.ToUUID(invoiceID),
+			BuktiPotongPph23Ref: pgconv.ToText(&buktiPotongRef),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrPaymentNotFound
+			}
+			return fmt.Errorf("update payment bukti potong: %w", err)
+		}
+
+		totals, err := q.PaymentTotalsByInvoice(ctx, pgconv.ToUUID(invoiceID))
+		if err != nil {
+			return fmt.Errorf("payment totals: %w", err)
+		}
+		effectivePaid := computeEffectivePaid(pgconv.FromNumeric(totals.TotalPaid), inv.PPh23EstimatedAmount, totals.HasBuktiPotong)
+
+		if effectivePaid.GreaterThanOrEqual(inv.Total) {
+			switch inv.Status {
+			case StatusDraft, StatusSent, StatusOverdue:
+				if _, err := q.UpdateInvoiceStatus(ctx, sqlcgen.UpdateInvoiceStatusParams{
+					ID:     pgconv.ToUUID(invoiceID),
+					Status: string(StatusPaid),
+				}); err != nil {
+					return fmt.Errorf("mark invoice paid: %w", err)
+				}
 			}
 		}
 

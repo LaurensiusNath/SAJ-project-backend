@@ -133,6 +133,25 @@ func (f *fakeRepository) ListPayments(_ context.Context, invoiceID uuid.UUID) ([
 	return f.payments[invoiceID], nil
 }
 
+// UpdatePaymentBuktiPotong di sini, SAMA seperti RecordPayment di atas,
+// SENGAJA tidak mereplikasi logika evaluasi status/locking sungguhan -
+// cuma menyimpan ref-nya. Skenario "mengisi bukti potong bikin invoice jadi
+// paid" dibuktikan lewat integration test terhadap Postgres asli
+// (integration_test.go), bukan lewat fake ini.
+func (f *fakeRepository) UpdatePaymentBuktiPotong(_ context.Context, invoiceID, paymentID uuid.UUID, buktiPotongRef string) (Payment, error) {
+	if _, ok := f.invoices[invoiceID]; !ok {
+		return Payment{}, ErrNotFound
+	}
+	payments := f.payments[invoiceID]
+	for i, p := range payments {
+		if p.ID == paymentID {
+			payments[i].BuktiPotongPPh23Ref = &buktiPotongRef
+			return payments[i], nil
+		}
+	}
+	return Payment{}, ErrPaymentNotFound
+}
+
 func (f *fakeRepository) MarkOverdue(_ context.Context) ([]Invoice, error) {
 	var overdue []Invoice
 	for id, inv := range f.invoices {
@@ -276,6 +295,31 @@ func TestService_RecordPayment(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+func TestService_UpdatePaymentBuktiPotong_EmptyRejected(t *testing.T) {
+	svc := NewService(newFakeRepository())
+
+	_, err := svc.UpdatePaymentBuktiPotong(context.Background(), uuid.New(), uuid.New(), "")
+
+	require.ErrorIs(t, err, ErrInvalidBuktiPotongRef)
+}
+
+// TestService_UpdatePaymentBuktiPotong_PaymentNotFound proves the service
+// propagates ErrPaymentNotFound (not ErrNotFound, not a generic error) when
+// payment_id doesn't match any payment under invoice_id - fakeRepository's
+// UpdatePaymentBuktiPotong returns this exact error (see service_test.go
+// fakeRepository definition above), this test just proves the service layer
+// doesn't swallow/replace it while wrapping.
+func TestService_UpdatePaymentBuktiPotong_PaymentNotFound(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	created, err := svc.CreateFromJob(context.Background(), uuid.New(), CreateInput{})
+	require.NoError(t, err)
+
+	_, err = svc.UpdatePaymentBuktiPotong(context.Background(), created.ID, uuid.New(), "BP-001")
+
+	require.ErrorIs(t, err, ErrPaymentNotFound)
 }
 
 // TestService_MarkOverdue proves the classification rule from
