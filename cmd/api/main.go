@@ -132,10 +132,14 @@ func main() {
 
 	// invoice.NewRepository butuh dbPool (bukan cuma queries) - CreateFromJob
 	// dan RecordPayment membuka transaksi sendiri (lihat internal/invoice/repository.go).
+	// RegisterRoutes butuh requireAdmin juga sekarang (pola sama dengan
+	// settings.Handler) - hampir semua endpoint modul ini tetap terbuka untuk
+	// semua role login lewat protectedGroup, KECUALI PATCH bukti-potong-pph23
+	// yang dibatasi owner/admin.
 	invoiceRepo := invoice.NewRepository(dbPool, queries, notifier)
 	invoiceService := invoice.NewService(invoiceRepo)
 	invoiceHandler := invoice.NewHandler(invoiceService)
-	invoiceHandler.RegisterRoutes(protectedGroup)
+	invoiceHandler.RegisterRoutes(protectedGroup, requireAdmin)
 
 	// dashboard.NewRepository butuh dbPool (bukan cuma queries) -
 	// GetSummary membuka transaksi REPEATABLE READ read-only sendiri (lihat

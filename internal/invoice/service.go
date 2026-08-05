@@ -155,6 +155,20 @@ func (s *Service) ListPayments(ctx context.Context, invoiceID uuid.UUID) ([]Paym
 	return payments, nil
 }
 
+// UpdatePaymentBuktiPotong: buktiPotongRef kosong ditolak di sini (sebelum
+// sempat ke database) - endpoint ini cuma untuk MENGISI referensi, bukan
+// menghapusnya (lihat ErrInvalidBuktiPotongRef).
+func (s *Service) UpdatePaymentBuktiPotong(ctx context.Context, invoiceID, paymentID uuid.UUID, buktiPotongRef string) (Payment, error) {
+	if buktiPotongRef == "" {
+		return Payment{}, ErrInvalidBuktiPotongRef
+	}
+	updated, err := s.repo.UpdatePaymentBuktiPotong(ctx, invoiceID, paymentID, buktiPotongRef)
+	if err != nil {
+		return Payment{}, fmt.Errorf("update payment bukti potong: %w", err)
+	}
+	return updated, nil
+}
+
 // MarkOverdue dipanggil dari ticker reminder yang sama dengan
 // job.ReminderService (lihat cmd/api/main.go/runReminderScheduler) - BUKAN
 // infrastruktur terjadwal baru. invoice package tidak bisa memiliki
