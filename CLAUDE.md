@@ -118,6 +118,14 @@ jelaskan konsekuensinya sebelum jalan.
 >    SANA — proses `go test` itu sendiri harus jalan dari dalam WSL2, bukan
 >    cuma dipanggil lewat `wsl -d Ubuntu -- ...` dari luar.
 
+### Bukti verifikasi wajib konkret, bukan naratif
+Kalau melaporkan hasil test/build/verifikasi, WAJIB sertakan bukti
+konkret: output command asli (bukan ringkasan "semua hijau"), link CI
+run kalau relevan, atau hasil query/curl yang bisa dicek ulang. Ini
+bukan formalitas — pernah ada insiden laporan "semua hijau" padahal
+go build sebenarnya gagal, ketahuan lewat pengecekan independen.
+Laporan tanpa bukti konkret akan diminta ulang.
+
 ### 4. Arsitektur — modular monolith dulu, microservice belakangan
 - Ikuti struktur Clean Architecture yang sudah ada: `internal/<domain>/domain.go`,
   `repository.go`, `service.go`, `handler.go`
