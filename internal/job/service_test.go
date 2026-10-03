@@ -160,6 +160,9 @@ func (f *fakeRepository) matches(j Job, filter ListFilter) bool {
 	if filter.CustomerID != nil && j.CustomerID != *filter.CustomerID {
 		return false
 	}
+	if filter.TechnicianID != nil && (j.TechnicianID == nil || *j.TechnicianID != *filter.TechnicianID) {
+		return false
+	}
 	return true
 }
 
@@ -510,4 +513,43 @@ func TestService_GetDetail_NotFound(t *testing.T) {
 	_, err := svc.GetDetail(context.Background(), uuid.New())
 
 	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// TestService_List_FiltersByTechnicianID membuktikan ListParams.TechnicianID
+// (scoping RBAC, keputusan 2026-10-03) benar-benar menyaring hasil List -
+// job.Handler yang memutuskan KAPAN filter ini dipaksa (role teknisi), tapi
+// Service/Repository harus tetap menghormatinya kalau diisi, persis seperti
+// Status/CustomerID. Job tanpa technician_id (belum di-assign) SENGAJA tidak
+// ikut muncul untuk filter manapun - konsisten dengan keputusan eksplisit
+// "job belum di-assign ikut tersembunyi dari teknisi, bukan tetap kelihatan
+// untuk diambil".
+func TestService_List_FiltersByTechnicianID(t *testing.T) {
+	repo := newFakeRepository()
+	svc := newTestService(repo)
+	ctx := context.Background()
+	technicianA := uuid.New()
+	technicianB := uuid.New()
+
+	jobA, err := svc.Create(ctx, CreateInput{CustomerID: uuid.New(), Title: "Job milik A"})
+	require.NoError(t, err)
+	repo.jobs[jobA.ID] = setTechnician(repo.jobs[jobA.ID], technicianA)
+
+	jobB, err := svc.Create(ctx, CreateInput{CustomerID: uuid.New(), Title: "Job milik B"})
+	require.NoError(t, err)
+	repo.jobs[jobB.ID] = setTechnician(repo.jobs[jobB.ID], technicianB)
+
+	_, err = svc.Create(ctx, CreateInput{CustomerID: uuid.New(), Title: "Job belum di-assign"})
+	require.NoError(t, err)
+
+	result, err := svc.List(ctx, ListParams{TechnicianID: &technicianA, Page: 1, Limit: 20})
+
+	require.NoError(t, err)
+	require.Len(t, result.Jobs, 1, "cuma job milik technicianA yang boleh muncul - bukan job B, bukan job yang belum di-assign")
+	assert.Equal(t, jobA.ID, result.Jobs[0].ID)
+	assert.Equal(t, int64(1), result.Total, "Count harus pakai filter yang sama persis dengan List")
+}
+
+func setTechnician(j Job, technicianID uuid.UUID) Job {
+	j.TechnicianID = &technicianID
+	return j
 }

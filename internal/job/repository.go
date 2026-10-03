@@ -34,9 +34,16 @@ func asInvalidReference(err error) error {
 // ListFilter dipakai bersama oleh List dan Count, sama pola dengan
 // customer.ListFilter - supaya meta.total tidak bisa "berbeda kriteria"
 // dari data yang benar-benar ditampilkan.
+//
+// TechnicianID: dipakai scoping RBAC (keputusan 2026-10-03) - handler.go
+// yang mengisi field ini dari JWT claim kalau pemanggil role teknisi (bukan
+// dari query param client), supaya repository ini sendiri tidak perlu tahu
+// apapun soal role/auth - dia cuma menjalankan filter apapun yang diberikan,
+// sama seperti Status/CustomerID.
 type ListFilter struct {
-	Status     *JobStatus
-	CustomerID *uuid.UUID
+	Status       *JobStatus
+	CustomerID   *uuid.UUID
+	TechnicianID *uuid.UUID
 }
 
 type Repository interface {
@@ -121,10 +128,11 @@ func (r *sqlcRepository) GetByID(ctx context.Context, id uuid.UUID) (Job, error)
 
 func (r *sqlcRepository) List(ctx context.Context, filter ListFilter, limit, offset int32) ([]Job, error) {
 	rows, err := r.q.ListJobs(ctx, sqlcgen.ListJobsParams{
-		Limit:      limit,
-		Offset:     offset,
-		Status:     toPgTextFromStatus(filter.Status),
-		CustomerID: pgconv.ToNullableUUID(filter.CustomerID),
+		Limit:        limit,
+		Offset:       offset,
+		Status:       toPgTextFromStatus(filter.Status),
+		CustomerID:   pgconv.ToNullableUUID(filter.CustomerID),
+		TechnicianID: pgconv.ToNullableUUID(filter.TechnicianID),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list jobs: %w", err)
@@ -138,8 +146,9 @@ func (r *sqlcRepository) List(ctx context.Context, filter ListFilter, limit, off
 
 func (r *sqlcRepository) Count(ctx context.Context, filter ListFilter) (int64, error) {
 	total, err := r.q.CountJobs(ctx, sqlcgen.CountJobsParams{
-		Status:     toPgTextFromStatus(filter.Status),
-		CustomerID: pgconv.ToNullableUUID(filter.CustomerID),
+		Status:       toPgTextFromStatus(filter.Status),
+		CustomerID:   pgconv.ToNullableUUID(filter.CustomerID),
+		TechnicianID: pgconv.ToNullableUUID(filter.TechnicianID),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("count jobs: %w", err)

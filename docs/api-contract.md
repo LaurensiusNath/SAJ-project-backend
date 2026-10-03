@@ -96,6 +96,16 @@ Body: `{ customer_id (required), machine_id, title (required), description, sche
 ### `GET /jobs`
 Query: `page`, `limit`, `status`, `customer_id` – `meta: { page, total }`
 
+> **Scoping RBAC untuk role `teknisi` — 2026-10-03**: role `teknisi` **TIDAK
+> menerima** parameter `technician_id` lewat query (parameter ini tidak pernah
+> ada di kontrak endpoint ini, sengaja) — backend **memaksa** filter
+> `technician_id = <user_id dari JWT>` secara otomatis untuk role ini, tidak
+> bisa dilewati. Job yang `technician_id`-nya `NULL` (belum di-assign
+> siapapun) **ikut tersembunyi** dari teknisi, bukan tetap muncul untuk
+> "diambil" — keputusan bisnis eksplisit, bukan keterbatasan teknis. Role
+> `owner`/`admin` tidak kena filter ini sama sekali, tetap melihat semua job
+> seperti sebelumnya.
+
 ### `GET /jobs/{id}` – **wajib nested, ini requirement, bukan opsional**
 Response `200` harus berisi object Job **plus**:
 - `status_history: []JobStatusHistory` (urut kronologis)
@@ -103,9 +113,25 @@ Response `200` harus berisi object Job **plus**:
 
 > Kalau implementasi saat ini mengembalikan object polos tanpa dua field ini, itu perlu diperbaiki — frontend detail-job butuh ini dalam satu request, bukan 3x round-trip.
 
+> **Scoping RBAC untuk role `teknisi` — 2026-10-03**: kalau job yang diminta
+> bukan milik teknisi yang login (`technician_id` beda, atau `NULL`), response
+> adalah `404 NOT_FOUND` — **BUKAN** `403` — supaya tidak membocorkan ke
+> teknisi bahwa job dengan ID tersebut memang ada tapi bukan miliknya. Role
+> `owner`/`admin` tidak kena pembatasan ini, bisa lihat job manapun seperti
+> sebelumnya.
+
 ### `PATCH /jobs/{id}/status`
 Body: `{ status (required, requested|scheduled|in_progress|completed|cancelled), notes }`
 `completed_date` otomatis diisi/dikosongkan mengikuti status. **Setiap perubahan wajib insert row baru ke `job_status_history`** (`status`, `changed_by` dari token JWT, `changed_at`, `notes`).
+
+> **Scoping RBAC untuk role `teknisi` — 2026-10-03**: sama persis dengan
+> `GET /jobs/{id}` — teknisi cuma boleh ubah status job miliknya sendiri,
+> `404 NOT_FOUND` (bukan `403`) kalau job bukan miliknya atau belum
+> di-assign siapapun. Dicek lewat baca job dulu sebelum update (bukan
+> digabung jadi satu query atomik) — bukan salah satu dari 3 titik ACID
+> eksplisit project ini (lihat CLAUDE.md), jadi ada celah TOCTOU kecil kalau
+> job di-reassign persis di antara dua baris itu; diterima sebagai trade-off
+> kesederhanaan untuk skala project ini.
 
 ### `PATCH /jobs/{id}/assign`
 Body: `{ technician_id (required), expected_updated_at (required, RFC3339) }`

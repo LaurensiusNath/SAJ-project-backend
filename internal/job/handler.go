@@ -12,6 +12,7 @@ import (
 	"github.com/nathan/cnc-pm-backend/internal/auth"
 	"github.com/nathan/cnc-pm-backend/internal/dateonly"
 	"github.com/nathan/cnc-pm-backend/internal/httpresponse"
+	"github.com/nathan/cnc-pm-backend/internal/user"
 )
 
 const dateLayout = "2006-01-02"
@@ -82,7 +83,41 @@ func (h *Handler) GetByID(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
+
+	// Scoping RBAC (keputusan 2026-10-03): teknisi yang menebak/menyimpan ID
+	// job bukan miliknya mendapat 404 persis sama dengan job yang benar-benar
+	// tidak ada - BUKAN 403 - supaya respons tidak membocorkan informasi
+	// "job ini ada, cuma kamu tidak boleh lihat". Lihat isJobHiddenFromCaller.
+	if h.isJobHiddenFromCaller(c, found.TechnicianID) {
+		httpresponse.Error(c, http.StatusNotFound, "NOT_FOUND", ErrNotFound.Error())
+		return
+	}
+
 	httpresponse.Success(c, http.StatusOK, found)
+}
+
+// isJobHiddenFromCaller: true kalau pemanggil role teknisi DAN job ini bukan
+// miliknya (technician_id beda, atau NULL - job belum di-assign siapapun
+// IKUT tersembunyi, sesuai keputusan 2026-10-03 eksplisit soal ini, bukan
+// tetap kelihatan untuk "diambil"). owner/admin selalu false (tidak pernah
+// disembunyikan) - scoping ini cuma berlaku untuk role teknisi.
+//
+// Kalau role/user_id tidak terbaca dari context (harusnya mustahil, selalu
+// di belakang RequireAuth), fail-closed (anggap disembunyikan) daripada
+// fail-open membocorkan data.
+func (h *Handler) isJobHiddenFromCaller(c *gin.Context, technicianID *uuid.UUID) bool {
+	role, ok := auth.RoleFromContext(c)
+	if !ok {
+		return true
+	}
+	if role != user.RoleTeknisi {
+		return false
+	}
+	callerID, ok := auth.UserIDFromContext(c)
+	if !ok {
+		return true
+	}
+	return technicianID == nil || *technicianID != callerID
 }
 
 func (h *Handler) List(c *gin.Context) {
@@ -105,11 +140,28 @@ func (h *Handler) List(c *gin.Context) {
 		customerID = &parsed
 	}
 
+	// Scoping RBAC (keputusan 2026-10-03): untuk role teknisi, technician_id
+	// DIPAKSA dari JWT claim user yang login - bukan query param opsional
+	// yang bisa dilewati client (endpoint ini memang tidak pernah menerima
+	// technician_id dari query sama sekali, sengaja, supaya tidak ada celah
+	// "teknisi A minta technician_id=B"). owner/admin tidak kena filter ini
+	// (nil), tetap melihat semua job seperti sebelumnya.
+	var technicianID *uuid.UUID
+	if role, ok := auth.RoleFromContext(c); ok && role == user.RoleTeknisi {
+		callerID, ok := auth.UserIDFromContext(c)
+		if !ok {
+			httpresponse.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "missing authentication")
+			return
+		}
+		technicianID = &callerID
+	}
+
 	result, err := h.svc.List(c.Request.Context(), ListParams{
-		Status:     status,
-		CustomerID: customerID,
-		Page:       int32(page),
-		Limit:      int32(limit),
+		Status:       status,
+		CustomerID:   customerID,
+		TechnicianID: technicianID,
+		Page:         int32(page),
+		Limit:        int32(limit),
 	})
 	if err != nil {
 		h.respondError(c, err)
@@ -146,6 +198,26 @@ func (h *Handler) UpdateStatus(c *gin.Context) {
 	changedBy, ok := auth.UserIDFromContext(c)
 	if !ok {
 		httpresponse.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "missing authentication")
+		return
+	}
+
+	// Scoping RBAC (keputusan 2026-10-03, perpanjangan dari GetByID): teknisi
+	// cuma boleh ubah status job yang di-assign ke dirinya. Dicek lewat
+	// GetByID terpisah dulu (bukan digabung ke query UPDATE) - job ini bukan
+	// salah satu dari tiga titik ACID eksplisit di CLAUDE.md (invoice create,
+	// payment, assign), jadi celah TOCTOU kecil antara pengecekan ini dan
+	// UpdateStatus di bawah (technician di-reassign PERSIS di antara dua
+	// baris ini) diterima sebagai trade-off kesederhanaan, sama seperti
+	// AssignTechnician.Create menerima race kecil di penomoran job_code.
+	// 404 (bukan 403) untuk konsistensi dengan GetByID - alasan sama
+	// (tidak membocorkan keberadaan job yang bukan miliknya).
+	current, err := h.svc.GetByID(c.Request.Context(), id)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	if h.isJobHiddenFromCaller(c, current.TechnicianID) {
+		httpresponse.Error(c, http.StatusNotFound, "NOT_FOUND", ErrNotFound.Error())
 		return
 	}
 
