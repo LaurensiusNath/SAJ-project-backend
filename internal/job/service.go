@@ -91,11 +91,19 @@ func (s *Service) GetDetail(ctx context.Context, id uuid.UUID) (Detail, error) {
 	return Detail{Job: j, StatusHistory: history, Costs: costs}, nil
 }
 
+// ListParams.TechnicianID: scoping RBAC (keputusan 2026-10-03) - handler.go
+// mengisi ini dari JWT claim user yang login kalau rolenya teknisi (bukan
+// dari query param client), memaksa teknisi cuma melihat job yang
+// technician_id-nya dirinya sendiri. Service ini sendiri tetap tidak tahu
+// apa-apa soal role - dia cuma meneruskan filter apapun yang diberikan ke
+// Repository, sama seperti Status/CustomerID (prinsip "modul bisnis tidak
+// menegakkan kebijakan otorisasi sendiri" yang sudah dipegang modul lain).
 type ListParams struct {
-	Status     *JobStatus
-	CustomerID *uuid.UUID
-	Page       int32
-	Limit      int32
+	Status       *JobStatus
+	CustomerID   *uuid.UUID
+	TechnicianID *uuid.UUID
+	Page         int32
+	Limit        int32
 }
 
 type ListResult struct {
@@ -118,7 +126,7 @@ func (s *Service) List(ctx context.Context, p ListParams) (ListResult, error) {
 	}
 	offset := (page - 1) * limit
 
-	filter := ListFilter{Status: p.Status, CustomerID: p.CustomerID}
+	filter := ListFilter{Status: p.Status, CustomerID: p.CustomerID, TechnicianID: p.TechnicianID}
 	jobs, err := s.repo.List(ctx, filter, limit, offset)
 	if err != nil {
 		return ListResult{}, fmt.Errorf("list jobs: %w", err)

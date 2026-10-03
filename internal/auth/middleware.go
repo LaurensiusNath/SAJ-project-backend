@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	contextKeyUserID = "auth_user_id"
-	contextKeyRole   = "auth_role"
+	ContextKeyUserID = "auth_user_id"
+	ContextKeyRole   = "auth_role"
 )
 
 // RequireAuth mengambil token JWT dari cookie access_token DULU (jalur utama
@@ -57,8 +57,8 @@ func (s *Service) RequireAuth() gin.HandlerFunc {
 			return
 		}
 
-		c.Set(contextKeyUserID, claims.UserID)
-		c.Set(contextKeyRole, claims.Role)
+		c.Set(ContextKeyUserID, claims.UserID)
+		c.Set(ContextKeyRole, claims.Role)
 		c.Next()
 	}
 }
@@ -87,7 +87,7 @@ func tokenFromRequest(c *gin.Context) (string, bool) {
 // baca context.
 func RequireRole(roles ...user.Role) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		value, ok := c.Get(contextKeyRole)
+		value, ok := c.Get(ContextKeyRole)
 		if !ok {
 			httpresponse.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "missing authentication")
 			c.Abort()
@@ -118,10 +118,27 @@ func RequireRole(roles ...user.Role) gin.HandlerFunc {
 // sifatnya dengan membaca header request biasa, bukan keputusan
 // otorisasi baru.
 func UserIDFromContext(c *gin.Context) (uuid.UUID, bool) {
-	value, ok := c.Get(contextKeyUserID)
+	value, ok := c.Get(ContextKeyUserID)
 	if !ok {
 		return uuid.UUID{}, false
 	}
 	id, ok := value.(uuid.UUID)
 	return id, ok
+}
+
+// RoleFromContext membaca role yang sudah divalidasi RequireAuth dari
+// gin.Context - dipakai modul bisnis yang perlu MEMBACA siapa pemanggilnya
+// untuk scoping data per-user (mis. job.Handler.List memaksa filter
+// technician_id untuk role teknisi, lihat keputusan RBAC 2026-10-03), BUKAN
+// untuk menegakkan "boleh/tidak boleh akses endpoint ini" (itu tetap tugas
+// RequireRole di level route, sama seperti sebelumnya) - sama prinsipnya
+// dengan UserIDFromContext di atas: cuma membaca data yang sudah divalidasi
+// middleware, bukan keputusan otorisasi baru.
+func RoleFromContext(c *gin.Context) (user.Role, bool) {
+	value, ok := c.Get(ContextKeyRole)
+	if !ok {
+		return "", false
+	}
+	role, ok := value.(user.Role)
+	return role, ok
 }

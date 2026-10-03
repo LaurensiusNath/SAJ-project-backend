@@ -23,9 +23,16 @@ SELECT * FROM jobs WHERE id = $1;
 SELECT * FROM jobs WHERE id = $1 FOR UPDATE;
 
 -- name: ListJobs :many
+-- technician_id: dipakai memaksa scoping "teknisi cuma lihat job miliknya
+-- sendiri" (keputusan RBAC 2026-10-03) - handler.go yang mengisi parameter
+-- ini dari JWT claim kalau role pemanggil teknisi, BUKAN dari query param
+-- client (supaya tidak bisa dilewati dengan mengirim technician_id punya
+-- orang lain). Untuk owner/admin, parameter ini selalu NULL (lihat tiga
+-- klausa lain di bawah - pola "OR $n IS NULL" yang sama).
 SELECT * FROM jobs
 WHERE (status = sqlc.narg('status') OR sqlc.narg('status') IS NULL)
   AND (customer_id = sqlc.narg('customer_id') OR sqlc.narg('customer_id') IS NULL)
+  AND (technician_id = sqlc.narg('technician_id') OR sqlc.narg('technician_id') IS NULL)
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
 
@@ -34,7 +41,8 @@ LIMIT $1 OFFSET $2;
 -- db/queries/customers.sql.
 SELECT COUNT(*) FROM jobs
 WHERE (status = sqlc.narg('status') OR sqlc.narg('status') IS NULL)
-  AND (customer_id = sqlc.narg('customer_id') OR sqlc.narg('customer_id') IS NULL);
+  AND (customer_id = sqlc.narg('customer_id') OR sqlc.narg('customer_id') IS NULL)
+  AND (technician_id = sqlc.narg('technician_id') OR sqlc.narg('technician_id') IS NULL);
 
 -- name: UpdateJobStatus :one
 UPDATE jobs
